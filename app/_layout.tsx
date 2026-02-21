@@ -10,8 +10,16 @@ import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { getProfile } from '@/services/profile.service';
 import ToastContainer from '@/components/ui/ToastContainer';
+import { DevPanel } from '@/components/DevPanel';
+import { DEV_MODE_ENABLED } from '@/lib/config';
+import { setupDevConsole } from '@/lib/devConsole';
 
 SplashScreen.preventAutoHideAsync();
+
+// Initialize dev console helpers
+if (DEV_MODE_ENABLED) {
+  setupDevConsole();
+}
 
 export default function RootLayout() {
   useFrameworkReady();
@@ -78,6 +86,7 @@ export default function RootLayout() {
       </Stack>
       <StatusBar style="light" />
       <ToastContainer />
+      {DEV_MODE_ENABLED && <DevPanel />}
     </>
   );
 }
