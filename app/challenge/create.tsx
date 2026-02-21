@@ -8,7 +8,7 @@ import { useToastStore } from '@/stores/toastStore';
 import { createMatch } from '@/services/match.service';
 import { MIN_WAGER, MAX_WAGER, EXERCISE_LABELS } from '@/lib/config';
 import Button from '@/components/ui/Button';
-import { X, Zap, DollarSign, ChevronLeft } from 'lucide-react-native';
+import { Zap, DollarSign, ChevronLeft, Trophy, Dumbbell } from 'lucide-react-native';
 
 const WAGER_PRESETS = [5, 10, 25, 50];
 
@@ -19,6 +19,7 @@ export default function CreateChallengeScreen() {
   const { show: showToast } = useToastStore();
 
   const [exercise, setExercise] = useState<'push_ups' | 'squats'>('push_ups');
+  const [mode, setMode] = useState<'competitive' | 'casual'>('competitive');
   const [wager, setWager] = useState('10');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -38,7 +39,7 @@ export default function CreateChallengeScreen() {
     }
     setLoading(true);
     try {
-      const match = await createMatch(session!.user!.id, exercise, wagerNum);
+      const match = await createMatch(session!.user!.id, exercise, wagerNum, undefined, mode);
       showToast({ type: 'success', title: 'Challenge created!', message: 'Waiting for an opponent...' });
       await refreshProfile();
       router.replace({ pathname: '/match/[id]', params: { id: match.id } });
@@ -79,6 +80,29 @@ export default function CreateChallengeScreen() {
           ))}
         </View>
 
+        <Text style={styles.sectionLabel}>MATCH MODE</Text>
+        <View style={styles.exerciseRow}>
+          {(['competitive', 'casual'] as const).map((m) => (
+            <TouchableOpacity
+              key={m}
+              style={[styles.exerciseOption, mode === m && styles.exerciseSelected]}
+              onPress={() => setMode(m)}
+            >
+              {m === 'competitive' ? (
+                <Trophy size={20} color={mode === m ? colors.primary : colors.textMuted} />
+              ) : (
+                <Dumbbell size={20} color={mode === m ? colors.primary : colors.textMuted} />
+              )}
+              <Text style={[styles.exerciseLabel, mode === m && styles.exerciseLabelSelected]}>
+                {m === 'competitive' ? 'Competitive' : 'Casual'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <Text style={styles.modeNote}>
+          {mode === 'competitive' ? '1.5x XP — Affects leaderboard ranking' : '1x XP — Does not affect leaderboard'}
+        </Text>
+
         <Text style={styles.sectionLabel}>WAGER AMOUNT</Text>
         <View style={styles.wagerRow}>
           {WAGER_PRESETS.map((p) => (
@@ -117,6 +141,12 @@ export default function CreateChallengeScreen() {
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Exercise</Text>
             <Text style={styles.summaryValue}>{EXERCISE_LABELS[exercise]}</Text>
+          </View>
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Mode</Text>
+            <Text style={[styles.summaryValue, mode === 'competitive' ? styles.winColor : null]}>
+              {mode === 'competitive' ? 'Competitive' : 'Casual'}
+            </Text>
           </View>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Duration</Text>
@@ -271,6 +301,13 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     textAlign: 'center',
     marginTop: spacing.xs,
+  },
+  modeNote: {
+    fontFamily: typography.fontBody,
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: spacing.xs,
+    marginBottom: spacing.xs,
   },
   createBtn: { marginTop: spacing.xl },
 });

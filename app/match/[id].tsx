@@ -10,7 +10,7 @@ import { getMatch, submitMatchScore, subscribeToMatch, isMatchExpired } from '@/
 import { usePoseDetection } from '@/hooks/usePoseDetection';
 import { useMatchTimer } from '@/hooks/useMatchTimer';
 import { colors, typography, spacing, radius } from '@/lib/theme';
-import { EXERCISE_LABELS } from '@/lib/config';
+import { EXERCISE_LABELS, DEV_MODE_ENABLED } from '@/lib/config';
 import { X, Zap, Clock, Check, AlertCircle } from 'lucide-react-native';
 import type { Match } from '@/types/database';
 
@@ -39,7 +39,7 @@ export default function MatchScreen() {
   const repAnim = useRef(new Animated.Value(1)).current;
 
   const handleRepCounted = useCallback((total: number) => {
-    console.log('[MatchScreen] handleRepCounted — total:', total);
+    if (DEV_MODE_ENABLED) console.log('[MatchScreen] handleRepCounted — total:', total);
     updateMyReps(total);
     Animated.sequence([
       Animated.timing(repAnim, { toValue: 1.4, duration: 80, useNativeDriver: true }),
@@ -55,6 +55,8 @@ export default function MatchScreen() {
     manualIncrement,
     reset: resetPose,
     detectionError,
+    lastFormQuality,
+    lastFormIssues,
   } = usePoseDetection({
     exerciseType: match?.exercise_type ?? 'push_ups',
     onRepCounted: handleRepCounted,
@@ -127,11 +129,11 @@ export default function MatchScreen() {
   }, [id, session]);
 
   async function loadMatch() {
-    console.log('[MatchScreen] loadMatch — id:', id, '| user:', session?.user?.id);
+    if (DEV_MODE_ENABLED) console.log('[MatchScreen] loadMatch — id:', id, '| user:', session?.user?.id);
     try {
       const m = await getMatch(id!);
       if (!m) throw new Error('Match not found');
-      console.log('[MatchScreen] loadMatch — fetched match:', { id: m.id, status: m.status, exercise: m.exercise_type });
+      if (DEV_MODE_ENABLED) console.log('[MatchScreen] loadMatch — fetched match:', { id: m.id, status: m.status, exercise: m.exercise_type });
       setMatch(m);
       setActiveMatch(m);
 
@@ -140,7 +142,7 @@ export default function MatchScreen() {
 
       // Setup realtime subscription to watch for opponent submission
       subscriptionRef.current = subscribeToMatch(m.id, (updated) => {
-        console.log('[MatchScreen] subscribeToMatch update — status:', updated.status, '| challenger_ready:', updated.challenger_ready, '| opponent_ready:', updated.opponent_ready);
+        if (DEV_MODE_ENABLED) console.log('[MatchScreen] subscribeToMatch update — status:', updated.status, '| challenger_ready:', updated.challenger_ready, '| opponent_ready:', updated.opponent_ready);
         setMatch(updated);
 
         // Auto-advance phase based on updated match state
@@ -196,7 +198,7 @@ export default function MatchScreen() {
 
     try {
       const updated = await submitMatchScore(match.id, session.user.id, reps);
-      console.log('[MatchScreen] submitScore success:', { id: updated.id, status: updated.status });
+      if (DEV_MODE_ENABLED) console.log('[MatchScreen] submitScore success:', { id: updated.id, status: updated.status });
       setMatch(updated);
 
       // If completed, show results
@@ -214,7 +216,7 @@ export default function MatchScreen() {
 
   // Start recording
   const handleStartRecording = () => {
-    console.log('[MatchScreen] handleStartRecording');
+    if (DEV_MODE_ENABLED) console.log('[MatchScreen] handleStartRecording');
     setPhase('recording');
     resetPose();
     startTimer();
@@ -317,6 +319,19 @@ export default function MatchScreen() {
                 {myReps}
               </Animated.Text>
               <Text style={styles.repLabel}>REPS</Text>
+              {lastFormQuality !== null && (
+                <View style={[
+                  styles.formBadge,
+                  lastFormQuality >= 90 ? styles.formBadgeGood :
+                  lastFormQuality >= 75 ? styles.formBadgeOk :
+                  styles.formBadgeBad,
+                ]}>
+                  <Text style={styles.formBadgeText}>
+                    FORM {lastFormQuality}%
+                    {lastFormQuality < 75 ? ' — ' + (lastFormIssues[0] ?? 'Check form') : ''}
+                  </Text>
+                </View>
+              )}
             </View>
 
             {detectionError && (
@@ -593,6 +608,21 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: colors.successDark,
     letterSpacing: 6,
+  },
+  formBadge: {
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
+  },
+  formBadgeGood: { backgroundColor: 'rgba(34,197,94,0.25)' },
+  formBadgeOk: { backgroundColor: 'rgba(255,184,0,0.25)' },
+  formBadgeBad: { backgroundColor: 'rgba(255,59,48,0.25)' },
+  formBadgeText: {
+    fontFamily: typography.fontBodyMedium,
+    fontSize: 12,
+    color: colors.text,
+    letterSpacing: 0.5,
   },
 
   // SUBMITTED PHASE
