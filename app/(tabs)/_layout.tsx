@@ -1,7 +1,7 @@
 import { Redirect, Tabs } from 'expo-router';
 import { useAuthStore } from '@/stores/authStore';
 import { colors, typography } from '@/lib/theme';
-import { Home, Trophy, User, Bell } from 'lucide-react-native';
+import { Home, Trophy, User, Bell, Dumbbell } from 'lucide-react-native';
 import { View, StyleSheet } from 'react-native';
 
 export default function TabsLayout() {
@@ -26,6 +26,13 @@ export default function TabsLayout() {
         options={{
           title: 'Home',
           tabBarIcon: ({ color, size }) => <Home size={size} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="practice"
+        options={{
+          title: 'Practice',
+          tabBarIcon: ({ color, size }) => <Dumbbell size={size} color={color} />,
         }}
       />
       <Tabs.Screen

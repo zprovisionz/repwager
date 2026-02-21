@@ -48,3 +48,27 @@ export async function getTransactions(userId: string) {
   if (error) throw error;
   return (data ?? []) as any[];
 }
+
+export async function getCompetitiveLeaderboard(limit = 50) {
+  const { data, error } = await (supabase.rpc as any)('get_competitive_leaderboard', {
+    p_limit: limit,
+  });
+  if (error) throw error;
+  return (data ?? []) as any[];
+}
+
+export async function getCasualLeaderboard(limit = 50) {
+  const { data, error } = await (supabase.rpc as any)('get_casual_leaderboard', {
+    p_limit: limit,
+  });
+  if (error) throw error;
+  return (data ?? []) as any[];
+}
+
+export async function getUserStats(userId: string) {
+  const { data, error } = await (supabase.rpc as any)('get_user_stats', {
+    p_user_id: userId,
+  });
+  if (error) throw error;
+  return data?.[0] ?? null;
+}

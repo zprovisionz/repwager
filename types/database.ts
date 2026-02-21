@@ -14,6 +14,7 @@ export interface Database {
           avatar_legs: string;
           balance: number;
           total_xp: number;
+          current_level: number;
           current_streak: number;
           longest_streak: number;
           last_active_date: string | null;
@@ -33,6 +34,7 @@ export interface Database {
           opponent_id: string | null;
           exercise_type: 'push_ups' | 'squats';
           wager_amount: number;
+          mode: 'competitive' | 'casual';
           status: 'pending' | 'accepted' | 'in_progress' | 'completed' | 'disputed' | 'cancelled';
           challenger_reps: number;
           opponent_reps: number;
@@ -112,6 +114,20 @@ export interface Database {
         Insert: Omit<Database['public']['Tables']['notifications']['Row'], 'id' | 'created_at'>;
         Update: Partial<Database['public']['Tables']['notifications']['Insert']>;
       };
+      practice_sessions: {
+        Row: {
+          id: string;
+          user_id: string;
+          exercise_type: 'push_ups' | 'squats';
+          reps: number;
+          duration_seconds: number;
+          notes: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['practice_sessions']['Row'], 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Database['public']['Tables']['practice_sessions']['Insert']>;
+      };
     };
     Functions: {
       new_user_profile: {
@@ -130,6 +146,26 @@ export interface Database {
         Args: { p_match_id: string };
         Returns: Database['public']['Tables']['matches']['Row'];
       };
+      record_practice_session: {
+        Args: { p_user_id: string; p_exercise_type: string; p_reps: number; p_notes?: string };
+        Returns: Database['public']['Tables']['practice_sessions']['Row'];
+      };
+      calculate_level: {
+        Args: { p_xp: number };
+        Returns: number;
+      };
+      get_competitive_leaderboard: {
+        Args: { p_limit?: number };
+        Returns: Array<any>;
+      };
+      get_casual_leaderboard: {
+        Args: { p_limit?: number };
+        Returns: Array<any>;
+      };
+      get_user_stats: {
+        Args: { p_user_id: string };
+        Returns: Array<any>;
+      };
     };
   };
 }
@@ -141,3 +177,4 @@ export type Transaction = Database['public']['Tables']['transactions']['Row'];
 export type Badge = Database['public']['Tables']['badges']['Row'];
 export type UserBadge = Database['public']['Tables']['user_badges']['Row'];
 export type Notification = Database['public']['Tables']['notifications']['Row'];
+export type PracticeSession = Database['public']['Tables']['practice_sessions']['Row'];

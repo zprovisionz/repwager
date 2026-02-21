@@ -2,37 +2,45 @@ import { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, RefreshControl, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, typography, spacing, radius } from '@/lib/theme';
-import { getLeaderboard } from '@/services/profile.service';
+import { getCompetitiveLeaderboard, getCasualLeaderboard } from '@/services/profile.service';
 import { useAuthStore } from '@/stores/authStore';
 import Avatar from '@/components/Avatar';
-import { Trophy, Zap, Star } from 'lucide-react-native';
+import { Trophy, Zap, Star, Flame } from 'lucide-react-native';
+import { getLevelInfo } from '@/lib/levelSystem';
+import type { Level } from '@/lib/levelSystem';
 
 interface LeaderRow {
-  id: string;
+  rank: number;
+  user_id: string;
   username: string;
   display_name: string;
+  current_level: Level;
+  total_xp: number;
   wins: number;
   losses: number;
   total_reps: number;
-  total_xp: number;
   avatar_gender: 'male' | 'female';
   avatar_head: string;
   avatar_torso: string;
   avatar_legs: string;
 }
 
+type LeaderboardMode = 'competitive' | 'casual';
+
 const RANK_COLORS = ['#FFB800', '#C0C0C0', '#CD7F32'];
 const RANK_ICONS = ['🥇', '🥈', '🥉'];
 
-function LeaderRow({ item, rank, isMe }: { item: LeaderRow; rank: number; isMe: boolean }) {
+function LeaderRow({ item, isMe }: { item: LeaderRow; isMe: boolean }) {
   const winRate = item.wins + item.losses > 0 ? Math.round((item.wins / (item.wins + item.losses)) * 100) : 0;
+  const levelInfo = getLevelInfo(item.current_level);
+
   return (
-    <View style={[styles.row, isMe && styles.rowHighlight, rank <= 3 && styles.rowTop]}>
+    <View style={[styles.row, isMe && styles.rowHighlight, item.rank <= 3 && styles.rowTop]}>
       <View style={styles.rankBox}>
-        {rank <= 3 ? (
-          <Text style={styles.rankEmoji}>{RANK_ICONS[rank - 1]}</Text>
+        {item.rank <= 3 ? (
+          <Text style={styles.rankEmoji}>{RANK_ICONS[item.rank - 1]}</Text>
         ) : (
-          <Text style={[styles.rankNum, isMe && styles.rankNumMe]}>#{rank}</Text>
+          <Text style={[styles.rankNum, isMe && styles.rankNumMe]}>#{item.rank}</Text>
         )}
       </View>
       <Avatar
@@ -43,7 +51,12 @@ function LeaderRow({ item, rank, isMe }: { item: LeaderRow; rank: number; isMe: 
         size={44}
       />
       <View style={styles.nameBlock}>
-        <Text style={[styles.displayName, isMe && styles.displayNameMe]}>{item.display_name}</Text>
+        <View style={styles.nameRow}>
+          <Text style={[styles.displayName, isMe && styles.displayNameMe]}>{item.display_name}</Text>
+          <View style={[styles.levelBadge, { backgroundColor: levelInfo.color }]}>
+            <Text style={styles.levelBadgeText}>Lvl {item.current_level}</Text>
+          </View>
+        </View>
         <Text style={styles.handle}>@{item.username}</Text>
       </View>
       <View style={styles.statsBlock}>
@@ -61,22 +74,33 @@ export default function LeaderboardScreen() {
   const insets = useSafeAreaInsets();
   const { session } = useAuthStore();
   const [leaders, setLeaders] = useState<LeaderRow[]>([]);
+  const [mode, setMode] = useState<LeaderboardMode>('competitive');
   const [refreshing, setRefreshing] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-  async function load() {
+  async function load(selectedMode: LeaderboardMode) {
     try {
-      const data = await getLeaderboard(50);
+      setIsLoading(true);
+      const data = selectedMode === 'competitive'
+        ? await getCompetitiveLeaderboard(50)
+        : await getCasualLeaderboard(50);
       setLeaders(data as LeaderRow[]);
-    } catch {}
+    } catch (error) {
+      console.error('Failed to load leaderboard:', error);
+    } finally {
+      setIsLoading(false);
+    }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load(mode);
+  }, [mode]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await load();
+    await load(mode);
     setRefreshing(false);
-  }, []);
+  }, [mode]);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -85,14 +109,35 @@ export default function LeaderboardScreen() {
         <Text style={styles.headerTitle}>LEADERBOARD</Text>
       </View>
 
+      {/* Mode toggle */}
+      <View style={styles.modeToggle}>
+        <TouchableOpacity
+          style={[styles.modeButton, mode === 'competitive' && styles.modeButtonActive]}
+          onPress={() => setMode('competitive')}
+        >
+          <Flame size={14} color={mode === 'competitive' ? colors.text : colors.textMuted} />
+          <Text style={[styles.modeButtonText, mode === 'competitive' && styles.modeButtonTextActive]}>
+            COMPETITIVE
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.modeButton, mode === 'casual' && styles.modeButtonActive]}
+          onPress={() => setMode('casual')}
+        >
+          <Zap size={14} color={mode === 'casual' ? colors.text : colors.textMuted} />
+          <Text style={[styles.modeButtonText, mode === 'casual' && styles.modeButtonTextActive]}>
+            CASUAL
+          </Text>
+        </TouchableOpacity>
+      </View>
+
       <FlatList
         data={leaders}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item, index }) => (
+        keyExtractor={(item) => `${item.user_id}-${item.rank}`}
+        renderItem={({ item }) => (
           <LeaderRow
             item={item}
-            rank={index + 1}
-            isMe={item.id === session?.user?.id}
+            isMe={item.user_id === session?.user?.id}
           />
         )}
         contentContainerStyle={styles.list}
@@ -128,6 +173,37 @@ const styles = StyleSheet.create({
     color: colors.text,
     letterSpacing: 3,
   },
+  modeToggle: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  modeButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.sm,
+    backgroundColor: colors.bgHighlight,
+  },
+  modeButtonActive: {
+    backgroundColor: colors.primary,
+  },
+  modeButtonText: {
+    fontFamily: typography.fontBodyMedium,
+    fontSize: 11,
+    color: colors.textMuted,
+    letterSpacing: 1,
+  },
+  modeButtonTextActive: {
+    color: colors.text,
+  },
   list: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, paddingBottom: 80 },
   row: {
     flexDirection: 'row',
@@ -157,12 +233,28 @@ const styles = StyleSheet.create({
   },
   rankNumMe: { color: colors.primary },
   nameBlock: { flex: 1 },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
   displayName: {
     fontFamily: typography.fontBodyBold,
     fontSize: 14,
     color: colors.text,
   },
   displayNameMe: { color: colors.primary },
+  levelBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+  },
+  levelBadgeText: {
+    fontFamily: typography.fontBodyMedium,
+    fontSize: 10,
+    color: colors.textInverse,
+    fontWeight: '600',
+  },
   handle: {
     fontFamily: typography.fontBody,
     fontSize: 12,
