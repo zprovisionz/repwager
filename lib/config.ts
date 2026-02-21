@@ -36,6 +36,21 @@ export const PUSH_UP_ELBOW_LOCKOUT_ANGLE = 160;
 export const PUSH_UP_BOTTOM_ANGLE = 90;
 export const SQUAT_BOTTOM_ANGLE = 90;
 
+// ─── FORM VALIDATION THRESHOLDS ─────────────────────────────────────────
+export const PUSH_UP_MIN_LOCKOUT_ANGLE = 155; // Minimum lockout (allow slight bend)
+export const PUSH_UP_MAX_BOTTOM_ANGLE = 100; // Maximum bottom angle (prevent half reps)
+export const PUSH_UP_MIN_RANGE = 60; // Minimum angle change per rep
+export const PUSH_UP_BODY_ALIGNMENT_MIN = 160; // Straight body check (shoulder-hip-knee)
+export const PUSH_UP_KNEE_DOWN_DETECTION = 0.65; // Hip height ratio (knees-down push-ups)
+
+export const SQUAT_MIN_DEPTH = 85; // Minimum squat depth (knee angle)
+export const SQUAT_MAX_DEPTH = 50; // Maximum depth (full squat)
+export const SQUAT_KNEE_TRACKING_TOLERANCE = 20; // Max deviation between left/right knees
+
+export const SYMMETRY_TOLERANCE = 20; // Max angle difference between left/right sides
+export const FORM_QUALITY_MIN_THRESHOLD = 75; // Minimum form quality percentage (0-100) to count rep
+export const POSE_CONFIDENCE_MIN = 0.6; // Minimum keypoint confidence (0-1, increased from 0.3)
+
 export const EXERCISE_LABELS: Record<string, string> = {
   push_ups: 'Push-Ups',
   squats: 'Squats',

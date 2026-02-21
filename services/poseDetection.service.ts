@@ -24,6 +24,19 @@ const PUSH_UP_ELBOW_LOCKOUT_ANGLE = 160;
 const PUSH_UP_BOTTOM_ANGLE = 90;
 const SQUAT_BOTTOM_ANGLE = 90;
 
+// Form validation thresholds
+const PUSH_UP_MIN_LOCKOUT_ANGLE = 155; // Minimum lockout (allow slight bend)
+const PUSH_UP_MAX_BOTTOM_ANGLE = 100; // Maximum bottom angle (prevent half reps)
+const PUSH_UP_MIN_RANGE = 60; // Minimum angle change per rep
+const PUSH_UP_BODY_ALIGNMENT_MIN = 160; // Straight body check (shoulder-hip-knee alignment)
+const PUSH_UP_KNEE_DOWN_DETECTION = 0.65; // Hip height ratio (knees-down push-ups have lower hips)
+
+const SQUAT_MIN_DEPTH = 85; // Minimum squat depth (knee angle)
+const SQUAT_MAX_DEPTH = 50; // Maximum depth (full squat)
+const SQUAT_KNEE_TRACKING_TOLERANCE = 20; // Max deviation between left/right knees
+
+const SYMMETRY_TOLERANCE = 20; // Max angle difference between left/right sides
+
 function getAngle(a: Keypoint, b: Keypoint, c: Keypoint): number {
   const radians =
     Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
@@ -66,6 +79,9 @@ export function analyzePushUp(
   }
   if (phase === 'down' && avgAngle > PUSH_UP_ELBOW_LOCKOUT_ANGLE) {
     console.log('[poseDetection] analyzePushUp — REP COUNTED (down -> up)');
+    // Validate form quality on rep completion
+    const validation = validatePushUpForm(pose, avgAngle, PUSH_UP_ELBOW_LOCKOUT_ANGLE);
+    console.log('[poseDetection] analyzePushUp — form quality:', validation.quality + '%', '| valid:', validation.isValid, '| issues:', validation.issues);
     return { newPhase: 'up', repCounted: true };
   }
   return { newPhase: phase, repCounted: false };
@@ -100,9 +116,180 @@ export function analyzeSquat(
   }
   if (phase === 'down' && avgAngle > 120) {
     console.log('[poseDetection] analyzeSquat — REP COUNTED (down -> up)');
+    // Validate form quality on rep completion
+    const validation = validateSquatForm(pose, avgAngle);
+    console.log('[poseDetection] analyzeSquat — form quality:', validation.quality + '%', '| valid:', validation.isValid, '| issues:', validation.issues);
     return { newPhase: 'up', repCounted: true };
   }
   return { newPhase: phase, repCounted: false };
+}
+
+/**
+ * Validate push-up form quality
+ * Checks for proper range of motion, body alignment, and prevents cheating
+ * @returns Form quality score (0-100, where 100 is perfect form)
+ */
+export function validatePushUpForm(pose: Pose, bottomAngle: number, lockoutAngle: number): {
+  isValid: boolean;
+  quality: number;
+  issues: string[];
+} {
+  const issues: string[] = [];
+  let qualityDeductions = 0;
+
+  // Check range of motion
+  const rangeOfMotion = Math.abs(lockoutAngle - bottomAngle);
+  if (rangeOfMotion < PUSH_UP_MIN_RANGE) {
+    issues.push('Incomplete range of motion');
+    qualityDeductions += 30;
+  }
+
+  // Check bottom position (should be ~90° or lower)
+  if (bottomAngle > PUSH_UP_MAX_BOTTOM_ANGLE) {
+    issues.push('Not lowering far enough (half rep)');
+    qualityDeductions += 25;
+  }
+
+  // Check lockout position (should be ~160° or higher)
+  if (lockoutAngle < PUSH_UP_MIN_LOCKOUT_ANGLE) {
+    issues.push('Not fully extending at top');
+    qualityDeductions += 20;
+  }
+
+  // Check body alignment (shoulder-hip-knee should be straight)
+  const lShoulder = getKeypoint(pose, 'left_shoulder');
+  const lHip = getKeypoint(pose, 'left_hip');
+  const lKnee = getKeypoint(pose, 'left_knee');
+  const rShoulder = getKeypoint(pose, 'right_shoulder');
+  const rHip = getKeypoint(pose, 'right_hip');
+  const rKnee = getKeypoint(pose, 'right_knee');
+
+  if (lShoulder && lHip && lKnee) {
+    const leftBodyAlignment = getAngle(lShoulder, lHip, lKnee);
+    if (leftBodyAlignment < PUSH_UP_BODY_ALIGNMENT_MIN) {
+      issues.push('Keep body straight (avoid sagging hips)');
+      qualityDeductions += 15;
+    }
+  }
+
+  if (rShoulder && rHip && rKnee) {
+    const rightBodyAlignment = getAngle(rShoulder, rHip, rKnee);
+    if (rightBodyAlignment < PUSH_UP_BODY_ALIGNMENT_MIN) {
+      issues.push('Keep body straight (avoid sagging hips)');
+      qualityDeductions += 15;
+    }
+  }
+
+  // Check for knee push-ups (hips too low relative to shoulders)
+  if (lShoulder && lHip && rShoulder && rHip) {
+    const avgShoulderHeight = (lShoulder.y + rShoulder.y) / 2;
+    const avgHipHeight = (lHip.y + rHip.y) / 2;
+    const hipHeightRatio = Math.abs(avgHipHeight - avgShoulderHeight) / avgShoulderHeight;
+
+    if (hipHeightRatio > PUSH_UP_KNEE_DOWN_DETECTION) {
+      issues.push('Full push-up detected (not on knees)');
+    }
+  }
+
+  // Check for asymmetry (left vs right sides)
+  const lElbow = getKeypoint(pose, 'left_elbow');
+  const rElbow = getKeypoint(pose, 'right_elbow');
+  const lWrist = getKeypoint(pose, 'left_wrist');
+  const rWrist = getKeypoint(pose, 'right_wrist');
+
+  if (lShoulder && lElbow && lWrist && rShoulder && rElbow && rWrist) {
+    const leftAngle = getAngle(lShoulder, lElbow, lWrist);
+    const rightAngle = getAngle(rShoulder, rElbow, rWrist);
+    const angleAsymmetry = Math.abs(leftAngle - rightAngle);
+
+    if (angleAsymmetry > SYMMETRY_TOLERANCE) {
+      issues.push('Uneven elbow angles (favor one side)');
+      qualityDeductions += 10;
+    }
+  }
+
+  const quality = Math.max(0, 100 - qualityDeductions);
+  const isValid = quality >= 75; // 75% is competitive minimum
+
+  return { isValid, quality, issues };
+}
+
+/**
+ * Validate squat form quality
+ * Checks for proper depth, knee tracking, and back alignment
+ * @returns Form quality score (0-100, where 100 is perfect form)
+ */
+export function validateSquatForm(pose: Pose, bottomAngle: number): {
+  isValid: boolean;
+  quality: number;
+  issues: string[];
+} {
+  const issues: string[] = [];
+  let qualityDeductions = 0;
+
+  const lHip = getKeypoint(pose, 'left_hip');
+  const lKnee = getKeypoint(pose, 'left_knee');
+  const lAnkle = getKeypoint(pose, 'left_ankle');
+  const rHip = getKeypoint(pose, 'right_hip');
+  const rKnee = getKeypoint(pose, 'right_knee');
+  const rAnkle = getKeypoint(pose, 'right_ankle');
+
+  // Check squat depth (should be 90° or lower for parallel/below-parallel)
+  if (bottomAngle > SQUAT_MIN_DEPTH) {
+    issues.push('Not squatting deep enough (quarter squat)');
+    qualityDeductions += 30;
+  }
+
+  // Check for excessive depth (prevent knee strain)
+  if (bottomAngle < SQUAT_MAX_DEPTH) {
+    issues.push('Going too deep (risk of injury)');
+    qualityDeductions += 15;
+  }
+
+  // Check knee tracking (knees should track over toes)
+  if (lKnee && lAnkle && rKnee && rAnkle) {
+    const leftKneeTracking = Math.abs(lKnee.x - lAnkle.x);
+    const rightKneeTracking = Math.abs(rKnee.x - rAnkle.x);
+
+    if (leftKneeTracking > 30) {
+      issues.push('Left knee caving inward');
+      qualityDeductions += 15;
+    }
+    if (rightKneeTracking > 30) {
+      issues.push('Right knee caving inward');
+      qualityDeductions += 15;
+    }
+  }
+
+  // Check bilateral symmetry (left vs right knees)
+  if (lHip && lKnee && lAnkle && rHip && rKnee && rAnkle) {
+    const leftAngle = getAngle(lHip, lKnee, lAnkle);
+    const rightAngle = getAngle(rHip, rKnee, rAnkle);
+    const kneeAsymmetry = Math.abs(leftAngle - rightAngle);
+
+    if (kneeAsymmetry > SQUAT_KNEE_TRACKING_TOLERANCE) {
+      issues.push('Uneven squat depth (one leg deeper)');
+      qualityDeductions += 10;
+    }
+  }
+
+  // Check back alignment (hip-knee angle should show upright torso)
+  if (lHip && lKnee && rHip && rKnee) {
+    const leftTorsoAngle = lHip.y - lKnee.y; // Vertical distance
+    const rightTorsoAngle = rHip.y - rKnee.y;
+    const avgTorsoAngle = (leftTorsoAngle + rightTorsoAngle) / 2;
+
+    if (avgTorsoAngle < 50) {
+      // If vertical distance is very small, torso is leaning too far forward
+      issues.push('Chest leaning too far forward');
+      qualityDeductions += 15;
+    }
+  }
+
+  const quality = Math.max(0, 100 - qualityDeductions);
+  const isValid = quality >= 75; // 75% is competitive minimum
+
+  return { isValid, quality, issues };
 }
 
 export function analyzeRep(
