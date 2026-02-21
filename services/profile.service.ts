@@ -65,6 +65,22 @@ export async function getCasualLeaderboard(limit = 50) {
   return (data ?? []) as any[];
 }
 
+export async function getUserLeaderboardRank(userId: string): Promise<number | null> {
+  try {
+    const data = await getCompetitiveLeaderboard(100);
+    const idx = (data as any[]).findIndex((r: any) => r.user_id === userId);
+    return idx >= 0 ? idx + 1 : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function markOnboardingShown(userId: string): Promise<void> {
+  await (supabase.from('profiles') as any)
+    .update({ onboarding_shown: true })
+    .eq('id', userId);
+}
+
 export async function getUserStats(userId: string) {
   const { data, error } = await (supabase.rpc as any)('get_user_stats', {
     p_user_id: userId,

@@ -13,6 +13,7 @@ import ToastContainer from '@/components/ui/ToastContainer';
 import { DevPanel } from '@/components/DevPanel';
 import { DEV_MODE_ENABLED } from '@/lib/config';
 import { setupDevConsole } from '@/lib/devConsole';
+import { registerPushToken } from '@/services/pushNotification.service';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -54,6 +55,7 @@ export default function RootLayout() {
           try {
             const p = await getProfile(session.user.id);
             setProfile(p);
+            registerPushToken(session.user.id);
           } catch {
             setProfile(null);
           }

@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import type { Match } from '@/types/database';
 
-export async function createMatch(challengerId: string, exerciseType: 'push_ups' | 'squats', wagerAmount: number, opponentId?: string): Promise<Match> {
+export async function createMatch(challengerId: string, exerciseType: 'push_ups' | 'squats', wagerAmount: number, opponentId?: string, mode: 'competitive' | 'casual' = 'competitive'): Promise<Match> {
   const { data, error } = await (supabase.from('matches') as any)
     .insert({
       challenger_id: challengerId,
@@ -9,6 +9,7 @@ export async function createMatch(challengerId: string, exerciseType: 'push_ups'
       wager_amount: wagerAmount,
       status: 'pending',
       opponent_id: opponentId ?? null,
+      mode,
     })
     .select()
     .maybeSingle();
@@ -26,27 +27,6 @@ export async function acceptMatch(matchId: string, opponentId: string): Promise<
   return data as Match;
 }
 
-export async function startMatch(matchId: string): Promise<Match> {
-  const { data, error } = await (supabase.from('matches') as any)
-    .update({ status: 'in_progress', started_at: new Date().toISOString() })
-    .eq('id', matchId)
-    .select()
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) throw new Error('Match not found');
-  return data as Match;
-}
-
-export async function completeMatch(matchId: string, winnerId: string, challengerReps: number, opponentReps: number): Promise<Match> {
-  const { data, error } = await (supabase.rpc as any)('complete_match', {
-    p_match_id: matchId,
-    p_winner_id: winnerId,
-    p_challenger_reps: challengerReps,
-    p_opponent_reps: opponentReps,
-  });
-  if (error) throw error;
-  return data as Match;
-}
 
 export async function cancelMatch(matchId: string): Promise<Match> {
   const { data, error } = await (supabase.rpc as any)('cancel_match', { p_match_id: matchId });
@@ -85,6 +65,18 @@ export async function getOpenChallenges(limit = 20) {
     .order('created_at', { ascending: false })
     .limit(limit);
   if (error) throw error;
+  return data ?? [];
+}
+
+export async function getHotMatches(limit = 6): Promise<any[]> {
+  const { data, error } = await (supabase.from('matches') as any)
+    .select('id, exercise_type, wager_amount, mode, created_at, profiles!matches_challenger_id_fkey(username)')
+    .eq('status', 'pending')
+    .is('opponent_id', null)
+    .gt('expires_at', new Date().toISOString())
+    .order('wager_amount', { ascending: false })
+    .limit(limit);
+  if (error) return [];
   return data ?? [];
 }
 

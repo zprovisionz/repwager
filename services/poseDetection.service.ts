@@ -53,7 +53,7 @@ function getKeypoint(pose: Pose, name: string): Keypoint | null {
 export function analyzePushUp(
   pose: Pose,
   phase: RepPhase
-): { newPhase: RepPhase; repCounted: boolean } {
+): { newPhase: RepPhase; repCounted: boolean; formQuality?: number; formIssues?: string[] } {
   const lShoulder = getKeypoint(pose, 'left_shoulder');
   const lElbow = getKeypoint(pose, 'left_elbow');
   const lWrist = getKeypoint(pose, 'left_wrist');
@@ -78,11 +78,8 @@ export function analyzePushUp(
     return { newPhase: 'down', repCounted: false };
   }
   if (phase === 'down' && avgAngle > PUSH_UP_ELBOW_LOCKOUT_ANGLE) {
-    console.log('[poseDetection] analyzePushUp — REP COUNTED (down -> up)');
-    // Validate form quality on rep completion
     const validation = validatePushUpForm(pose, avgAngle, PUSH_UP_ELBOW_LOCKOUT_ANGLE);
-    console.log('[poseDetection] analyzePushUp — form quality:', validation.quality + '%', '| valid:', validation.isValid, '| issues:', validation.issues);
-    return { newPhase: 'up', repCounted: true };
+    return { newPhase: 'up', repCounted: true, formQuality: validation.quality, formIssues: validation.issues };
   }
   return { newPhase: phase, repCounted: false };
 }
@@ -90,7 +87,7 @@ export function analyzePushUp(
 export function analyzeSquat(
   pose: Pose,
   phase: RepPhase
-): { newPhase: RepPhase; repCounted: boolean } {
+): { newPhase: RepPhase; repCounted: boolean; formQuality?: number; formIssues?: string[] } {
   const lHip = getKeypoint(pose, 'left_hip');
   const lKnee = getKeypoint(pose, 'left_knee');
   const lAnkle = getKeypoint(pose, 'left_ankle');
@@ -115,11 +112,8 @@ export function analyzeSquat(
     return { newPhase: 'down', repCounted: false };
   }
   if (phase === 'down' && avgAngle > 120) {
-    console.log('[poseDetection] analyzeSquat — REP COUNTED (down -> up)');
-    // Validate form quality on rep completion
     const validation = validateSquatForm(pose, avgAngle);
-    console.log('[poseDetection] analyzeSquat — form quality:', validation.quality + '%', '| valid:', validation.isValid, '| issues:', validation.issues);
-    return { newPhase: 'up', repCounted: true };
+    return { newPhase: 'up', repCounted: true, formQuality: validation.quality, formIssues: validation.issues };
   }
   return { newPhase: phase, repCounted: false };
 }
@@ -296,7 +290,7 @@ export function analyzeRep(
   pose: Pose,
   exerciseType: ExerciseType,
   phase: RepPhase
-): { newPhase: RepPhase; repCounted: boolean } {
+): { newPhase: RepPhase; repCounted: boolean; formQuality?: number; formIssues?: string[] } {
   if (exerciseType === 'push_ups') return analyzePushUp(pose, phase);
   return analyzeSquat(pose, phase);
 }

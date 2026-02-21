@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Animated, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Animated, TouchableOpacity, ScrollView, Modal, TextInput } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, typography, spacing, radius } from '@/lib/theme';
 import { useAuthStore } from '@/stores/authStore';
 import { useMatchStore } from '@/stores/matchStore';
 import { useToastStore } from '@/stores/toastStore';
-import { Trophy, Frown, Zap, Share2 } from 'lucide-react-native';
+import { Trophy, Frown, Zap, AlertTriangle } from 'lucide-react-native';
 import Button from '@/components/ui/Button';
+import { LevelUpAnimation } from '@/components/LevelUpAnimation';
 import { checkAndAwardBadges } from '@/services/badge.service';
-import { getMatch } from '@/services/match.service';
+import { getMatch, fileDispute } from '@/services/match.service';
+import { calculateLevel } from '@/lib/levelSystem';
 import type { Match } from '@/types/database';
+import type { Level } from '@/lib/levelSystem';
 
 function ConfettiPiece({ delay, color }: { delay: number; color: string }) {
   const anim = useRef(new Animated.Value(0)).current;
@@ -55,6 +58,13 @@ export default function ResultsScreen() {
   const { show: showToast } = useToastStore();
 
   const [match, setMatch] = useState<Match | null>(null);
+  const [levelUpVisible, setLevelUpVisible] = useState(false);
+  const [newLevel, setNewLevel] = useState<Level>(1);
+  const [previousLevel, setPreviousLevel] = useState<Level>(1);
+  const [newXp, setNewXp] = useState(0);
+  const [disputeVisible, setDisputeVisible] = useState(false);
+  const [disputeReason, setDisputeReason] = useState('');
+  const [disputeLoading, setDisputeLoading] = useState(false);
 
   const won = isWinner === 'true';
   const reps = parseInt(myReps ?? '0');
@@ -75,18 +85,48 @@ export default function ResultsScreen() {
     }
 
     if (session?.user && profile) {
+      const prevLevel = calculateLevel(profile.total_xp ?? 0);
+
       checkAndAwardBadges(session.user.id, profile, reps).then((badges) => {
         badges.forEach((b) => {
           showToast({ type: 'badge', title: 'Badge Earned!', message: b.replace(/_/g, ' ') });
         });
       });
-      refreshProfile();
+
+      refreshProfile().then(() => {
+        const updatedProfile = useAuthStore.getState().profile;
+        if (updatedProfile) {
+          const updatedXp = updatedProfile.total_xp ?? 0;
+          const updatedLevel = calculateLevel(updatedXp);
+          if (updatedLevel > prevLevel) {
+            setPreviousLevel(prevLevel);
+            setNewLevel(updatedLevel);
+            setNewXp(updatedXp);
+            setLevelUpVisible(true);
+          }
+        }
+      });
     }
 
     return () => {
       setActiveMatch(null);
     };
   }, [matchId, session?.user?.id]);
+
+  async function handleFileDispute() {
+    if (!matchId || !disputeReason.trim()) return;
+    setDisputeLoading(true);
+    try {
+      await fileDispute(matchId, disputeReason.trim());
+      showToast({ type: 'success', title: 'Dispute filed', message: 'Our team will review this match.' });
+      setDisputeVisible(false);
+      setDisputeReason('');
+    } catch {
+      showToast({ type: 'error', title: 'Failed to file dispute' });
+    } finally {
+      setDisputeLoading(false);
+    }
+  }
 
   const confettiPieces = won
     ? Array.from({ length: 40 }, (_, i) => ({
@@ -100,6 +140,48 @@ export default function ResultsScreen() {
       {confettiPieces.map((p, i) => (
         <ConfettiPiece key={i} delay={p.delay} color={p.color} />
       ))}
+
+      <LevelUpAnimation
+        visible={levelUpVisible}
+        level={newLevel}
+        previousLevel={previousLevel}
+        xp={newXp}
+        onDismiss={() => setLevelUpVisible(false)}
+      />
+
+      <Modal visible={disputeVisible} transparent animationType="fade" onRequestClose={() => setDisputeVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { paddingBottom: insets.bottom + spacing.lg }]}>
+            <View style={styles.modalHeader}>
+              <AlertTriangle size={22} color={colors.warning} />
+              <Text style={styles.modalTitle}>File a Dispute</Text>
+            </View>
+            <Text style={styles.modalSubtitle}>Describe the issue with this match. Our team will review it.</Text>
+            <TextInput
+              style={styles.disputeInput}
+              value={disputeReason}
+              onChangeText={setDisputeReason}
+              placeholder="Describe what went wrong..."
+              placeholderTextColor={colors.textMuted}
+              multiline
+              numberOfLines={4}
+              textAlignVertical="top"
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setDisputeVisible(false)}>
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.submitDisputeBtn, (!disputeReason.trim() || disputeLoading) && styles.btnDisabled]}
+                onPress={handleFileDispute}
+                disabled={!disputeReason.trim() || disputeLoading}
+              >
+                <Text style={styles.submitDisputeBtnText}>{disputeLoading ? 'Filing...' : 'Submit'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <Animated.View style={[styles.heroSection, { opacity: titleAnim, transform: [{ scale: scaleAnim }] }]}>
@@ -159,6 +241,10 @@ export default function ResultsScreen() {
             size="lg"
             style={styles.actionBtn}
           />
+          <TouchableOpacity style={styles.disputeLink} onPress={() => setDisputeVisible(true)}>
+            <AlertTriangle size={14} color={colors.textMuted} />
+            <Text style={styles.disputeLinkText}>File a dispute</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </View>
@@ -265,6 +351,92 @@ const styles = StyleSheet.create({
   actions: {
     width: '100%',
     gap: spacing.sm,
+    alignItems: 'center',
   },
   actionBtn: { width: '100%' },
+  disputeLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  disputeLinkText: {
+    fontFamily: typography.fontBody,
+    fontSize: 13,
+    color: colors.textMuted,
+    textDecorationLine: 'underline',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    backgroundColor: colors.bgCard,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    padding: spacing.xl,
+    gap: spacing.md,
+    borderTopWidth: 1,
+    borderColor: colors.border,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  modalTitle: {
+    fontFamily: typography.fontDisplayMedium,
+    fontSize: 18,
+    color: colors.text,
+  },
+  modalSubtitle: {
+    fontFamily: typography.fontBody,
+    fontSize: 14,
+    color: colors.textSecondary,
+  },
+  disputeInput: {
+    backgroundColor: colors.bgElevated,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    fontFamily: typography.fontBody,
+    fontSize: 14,
+    color: colors.text,
+    minHeight: 100,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  cancelBtn: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  cancelBtnText: {
+    fontFamily: typography.fontBodyBold,
+    fontSize: 14,
+    color: colors.textSecondary,
+  },
+  submitDisputeBtn: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    borderRadius: radius.md,
+    backgroundColor: colors.warning,
+  },
+  submitDisputeBtnText: {
+    fontFamily: typography.fontBodyBold,
+    fontSize: 14,
+    color: '#000',
+  },
+  btnDisabled: {
+    opacity: 0.4,
+  },
 });
