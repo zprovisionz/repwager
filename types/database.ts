@@ -146,6 +146,18 @@ export interface Database {
         Insert: Omit<Database['public']['Tables']['practice_sessions']['Row'], 'id' | 'created_at' | 'updated_at'>;
         Update: Partial<Database['public']['Tables']['practice_sessions']['Insert']>;
       };
+      theatre_notes: {
+        Row: {
+          id: string;
+          match_id: string;
+          user_id: string;
+          notes: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['theatre_notes']['Row'], 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Database['public']['Tables']['theatre_notes']['Insert']>;
+      };
     };
     Functions: {
       new_user_profile: {

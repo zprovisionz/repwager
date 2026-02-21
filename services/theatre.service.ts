@@ -4,7 +4,7 @@
  */
 
 import { supabase } from '@/lib/supabase';
-import type { TheatreMatch, PrivateNote } from '@/types/theatre';
+import type { TheatreMatch, FormQualityMarker, PrivateNote } from '@/types/theatre';
 
 export type TheatreFilter = 'all' | 'wins' | 'losses' | 'push_ups' | 'squats' | 'disputed';
 export type TheatreSort = 'recent' | 'oldest' | 'best_performance';
@@ -33,79 +33,83 @@ class TheatreService {
           opponent_id,
           challenger_reps,
           opponent_reps,
+          winner_id,
+          duration_seconds,
           created_at,
           challenger:profiles!challenger_id(id, display_name, avatar_gender, avatar_head, avatar_torso, avatar_legs),
           opponent:profiles!opponent_id(id, display_name, avatar_gender, avatar_head, avatar_torso, avatar_legs),
-          match_videos(storage_path)
+          match_videos(user_id, storage_path)
         `
         )
-        .eq('status', 'completed')
         .or(`challenger_id.eq.${userId},opponent_id.eq.${userId}`);
 
-      // Apply filter
+      // Status filter
+      if (filter === 'disputed') {
+        query = query.eq('status', 'disputed');
+      } else {
+        query = query.eq('status', 'completed');
+      }
+
+      // Outcome filters
       if (filter === 'wins') {
-        query = query.or(
-          `challenger_id.eq.${userId},opponent_id.eq.${userId}`,
-          {
-            foreignTable: 'winner_id',
-          }
-        );
+        query = query.eq('winner_id', userId);
       } else if (filter === 'losses') {
-        // Losses would be where user didn't win
+        query = query.neq('winner_id', userId).not('winner_id', 'is', null);
       } else if (filter === 'push_ups') {
         query = query.eq('exercise_type', 'push_ups');
       } else if (filter === 'squats') {
         query = query.eq('exercise_type', 'squats');
-      } else if (filter === 'disputed') {
-        // Disputed matches - would need a status field
       }
 
-      // Apply sort
-      const sortField = sort === 'recent' ? 'created_at' : 'created_at';
-      const sortAscending = sort === 'oldest';
-      query = query.order(sortField, { ascending: sortAscending });
+      // Sort
+      const ascending = sort === 'oldest';
+      query = query.order('created_at', { ascending });
 
       const { data, error } = await query.limit(50);
 
       if (error) throw error;
 
-      // Transform to TheatreMatch format
       return (data || []).map((match: any) => {
         const isChallenger = match.challenger_id === userId;
         const opponentProfile = isChallenger ? match.opponent : match.challenger;
         const myReps = isChallenger ? match.challenger_reps : match.opponent_reps;
         const opponentReps = isChallenger ? match.opponent_reps : match.challenger_reps;
 
-        // Determine outcome
         let outcome: 'win' | 'loss' | 'disputed' = 'loss';
-        if (myReps > opponentReps) {
-          outcome = 'win';
-        } else if (myReps < opponentReps) {
-          outcome = 'loss';
-        } else {
+        if (match.status === 'disputed') {
           outcome = 'disputed';
+        } else if (match.winner_id === userId) {
+          outcome = 'win';
+        } else {
+          outcome = 'loss';
         }
 
-        const videoPath = match.match_videos?.[0]?.storage_path;
+        const videos: any[] = match.match_videos || [];
+        const myVideo = videos.find((v: any) => v.user_id === userId);
+        const opponentVideo = videos.find((v: any) => v.user_id !== userId);
 
         return {
           id: match.id,
-          opponentId: opponentProfile.id,
-          opponentName: opponentProfile.display_name,
-          opponentAvatar: {
-            gender: opponentProfile.avatar_gender || 'male',
-            head: opponentProfile.avatar_head || 'head_default',
-            torso: opponentProfile.avatar_torso || 'torso_default',
-            legs: opponentProfile.avatar_legs || 'legs_default',
-          },
+          opponentId: opponentProfile?.id || '',
+          opponentName: opponentProfile?.display_name || 'Unknown',
+          opponentAvatar: opponentProfile
+            ? {
+                gender: opponentProfile.avatar_gender || 'male',
+                head: opponentProfile.avatar_head || 'head_default',
+                torso: opponentProfile.avatar_torso || 'torso_default',
+                legs: opponentProfile.avatar_legs || 'legs_default',
+              }
+            : undefined,
           exerciseType: match.exercise_type as 'push_ups' | 'squats',
           mode: match.mode as 'casual' | 'competitive',
           outcome,
           myReps,
           opponentReps,
           matchDate: new Date(match.created_at).getTime(),
-          videoPath,
+          videoPath: myVideo?.storage_path,
+          opponentVideoPath: opponentVideo?.storage_path,
           wagerAmount: match.wager_amount,
+          durationSeconds: match.duration_seconds,
         };
       });
     } catch (error) {
@@ -117,7 +121,7 @@ class TheatreService {
   /**
    * Get a specific match with all details for playback
    */
-  async getMatchForPlayback(matchId: string): Promise<TheatreMatch | null> {
+  async getMatchForPlayback(matchId: string, currentUserId: string): Promise<TheatreMatch | null> {
     try {
       const { data, error } = await supabase
         .from('matches')
@@ -132,10 +136,12 @@ class TheatreService {
           opponent_id,
           challenger_reps,
           opponent_reps,
+          winner_id,
+          duration_seconds,
           created_at,
           challenger:profiles!challenger_id(id, display_name, avatar_gender, avatar_head, avatar_torso, avatar_legs),
           opponent:profiles!opponent_id(id, display_name, avatar_gender, avatar_head, avatar_torso, avatar_legs),
-          match_videos(storage_path)
+          match_videos(user_id, storage_path)
         `
         )
         .eq('id', matchId)
@@ -144,27 +150,45 @@ class TheatreService {
       if (error) throw error;
       if (!data) return null;
 
-      // You'd need to know which user is viewing to determine outcome
-      const videoPath = data.match_videos?.[0]?.storage_path;
+      const d = data as any;
+      const isChallenger = d.challenger_id === currentUserId;
+      const opponentProfile = isChallenger ? d.opponent : d.challenger;
+      const myReps = isChallenger ? d.challenger_reps : d.opponent_reps;
+      const opponentReps = isChallenger ? d.opponent_reps : d.challenger_reps;
+
+      let outcome: 'win' | 'loss' | 'disputed' = 'loss';
+      if (d.status === 'disputed') {
+        outcome = 'disputed';
+      } else if (d.winner_id === currentUserId) {
+        outcome = 'win';
+      }
+
+      const videos: any[] = d.match_videos || [];
+      const myVideo = videos.find((v: any) => v.user_id === currentUserId);
+      const opponentVideo = videos.find((v: any) => v.user_id !== currentUserId);
 
       return {
-        id: data.id,
-        opponentId: data.opponent_id,
-        opponentName: data.opponent.display_name,
-        opponentAvatar: {
-          gender: data.opponent.avatar_gender || 'male',
-          head: data.opponent.avatar_head || 'head_default',
-          torso: data.opponent.avatar_torso || 'torso_default',
-          legs: data.opponent.avatar_legs || 'legs_default',
-        },
-        exerciseType: data.exercise_type as 'push_ups' | 'squats',
-        mode: data.mode as 'casual' | 'competitive',
-        outcome: 'loss', // Would need user context
-        myReps: data.challenger_reps,
-        opponentReps: data.opponent_reps,
-        matchDate: new Date(data.created_at).getTime(),
-        videoPath,
-        wagerAmount: data.wager_amount,
+        id: d.id,
+        opponentId: opponentProfile?.id || d.opponent_id || '',
+        opponentName: opponentProfile?.display_name || 'Unknown',
+        opponentAvatar: opponentProfile
+          ? {
+              gender: opponentProfile.avatar_gender || 'male',
+              head: opponentProfile.avatar_head || 'head_default',
+              torso: opponentProfile.avatar_torso || 'torso_default',
+              legs: opponentProfile.avatar_legs || 'legs_default',
+            }
+          : undefined,
+        exerciseType: d.exercise_type as 'push_ups' | 'squats',
+        mode: d.mode as 'casual' | 'competitive',
+        outcome,
+        myReps,
+        opponentReps,
+        matchDate: new Date(d.created_at).getTime(),
+        videoPath: myVideo?.storage_path,
+        opponentVideoPath: opponentVideo?.storage_path,
+        wagerAmount: d.wager_amount,
+        durationSeconds: d.duration_seconds,
       };
     } catch (error) {
       console.error('[TheatreService] Error fetching match for playback:', error);
@@ -177,7 +201,7 @@ class TheatreService {
    */
   async savePrivateNotes(matchId: string, userId: string, notes: string): Promise<boolean> {
     try {
-      const { error } = await supabase.from('theatre_notes').upsert(
+      const { error } = await (supabase as any).from('theatre_notes').upsert(
         {
           match_id: matchId,
           user_id: userId,
@@ -200,15 +224,15 @@ class TheatreService {
    */
   async getPrivateNotes(matchId: string, userId: string): Promise<string | null> {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from('theatre_notes')
         .select('notes')
         .eq('match_id', matchId)
         .eq('user_id', userId)
         .single();
 
-      if (error && error.code !== 'PGRST116') throw error; // 116 = not found
-      return data?.notes || null;
+      if (error && error.code !== 'PGRST116') throw error;
+      return (data as any)?.notes || null;
     } catch (error) {
       console.error('[TheatreService] Error fetching notes:', error);
       return null;
@@ -216,18 +240,19 @@ class TheatreService {
   }
 
   /**
-   * Get rep timeline markers from stored form quality data
-   * Note: This is simplified - in production would retrieve from rep_quality table
+   * Generate estimated rep timeline markers.
+   * Since per-rep form quality is not stored in the DB, we distribute reps evenly
+   * across the video duration and assign a neutral quality score (75).
+   * In future, store quality per rep at submission time to get real colours.
    */
-  async getRepTimeline(matchId: string): Promise<any[]> {
-    try {
-      // In production, you'd have a rep_quality or match_events table
-      // For now, return empty array that will be populated during playback
-      return [];
-    } catch (error) {
-      console.error('[TheatreService] Error fetching rep timeline:', error);
-      return [];
-    }
+  getRepTimeline(totalReps: number, durationSeconds: number): FormQualityMarker[] {
+    if (!totalReps || !durationSeconds) return [];
+    return Array.from({ length: totalReps }, (_, i) => ({
+      repNumber: i + 1,
+      timestamp: Math.round(((i + 1) / totalReps) * durationSeconds * 1000),
+      quality: 75, // neutral — no per-rep data stored yet
+      issues: [],
+    }));
   }
 }
 

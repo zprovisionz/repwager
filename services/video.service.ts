@@ -22,9 +22,12 @@ class VideoService {
   }
 
   /**
-   * Get match videos for both players
+   * Get match videos for both players, correctly distinguishing self vs opponent
    */
-  async getMatchVideos(matchId: string): Promise<{ self: string | null; opponent: string | null }> {
+  async getMatchVideos(
+    matchId: string,
+    currentUserId: string
+  ): Promise<{ self: string | null; opponent: string | null }> {
     try {
       const { data, error } = await supabase
         .from('match_videos')
@@ -33,9 +36,9 @@ class VideoService {
 
       if (error) throw error;
 
-      const videos: { [key: string]: string } = {};
+      const videos: Record<string, string> = {};
 
-      for (const video of data || []) {
+      for (const video of (data || []) as any[]) {
         const signedUrl = await this.getSignedVideoUrl(video.storage_path);
         if (signedUrl) {
           videos[video.user_id] = signedUrl;
@@ -43,8 +46,8 @@ class VideoService {
       }
 
       return {
-        self: Object.values(videos)[0] || null,
-        opponent: Object.values(videos)[1] || null,
+        self: videos[currentUserId] || null,
+        opponent: Object.entries(videos).find(([id]) => id !== currentUserId)?.[1] || null,
       };
     } catch (error) {
       console.error('[VideoService] Error fetching match videos:', error);
@@ -53,43 +56,18 @@ class VideoService {
   }
 
   /**
-   * Apply color masking to video URL
-   * MVP: Uses CSS filters, not actual video processing
-   * Future: Could use FFmpeg or vision-camera for real masking
+   * Get mask color style for a given player type (React Native View overlay approach)
+   * CSS filters don't work on native — callers apply backgroundColor to an absoluteFill View
    */
-  getPrivacyMaskStyles(playerType: 'self' | 'opponent'): any {
-    // MVP implementation: Use CSS filter to tint the video
-    const colors = {
-      self: 'hue-rotate(150deg) saturate(2)', // Cyan-ish
-      opponent: 'hue-rotate(310deg) saturate(2)', // Pink-ish
-    };
-
-    return {
-      filter: colors[playerType],
-      opacity: 0.7,
-    };
-  }
-
-  /**
-   * Toggle masking state
-   */
-  toggleMasking(enabled: boolean, playerType: 'self' | 'opponent'): {
-    filter: string;
-    opacity: number;
-  } {
-    if (!enabled) {
-      return {
-        filter: 'none',
-        opacity: 1,
-      };
-    }
-
-    return this.getPrivacyMaskStyles(playerType);
+  getMaskColor(playerType: 'self' | 'opponent'): string {
+    return playerType === 'self'
+      ? 'rgba(0, 212, 255, 0.35)'   // Electric cyan for self
+      : 'rgba(255, 45, 120, 0.35)'; // Hot pink for opponent
   }
 
   /**
    * Generate shareable clip from video
-   * MVP: Returns info for sharing, logic deferred to Phase 5
+   * MVP: Returns info for sharing, actual processing deferred to Phase 7
    */
   generateShareableClip(
     videoUrl: string,
@@ -127,7 +105,7 @@ class VideoService {
       if (!file) return null;
 
       return {
-        duration: 0, // Would need to parse video metadata
+        duration: 0,
         size: file.metadata?.size || 0,
       };
     } catch (error) {

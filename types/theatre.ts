@@ -22,6 +22,7 @@ export interface TheatreMatch {
   videoPath?: string;
   opponentVideoPath?: string;
   wagerAmount?: number;
+  durationSeconds?: number;
 }
 
 export interface FormQualityMarker {

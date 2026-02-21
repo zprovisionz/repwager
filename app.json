@@ -27,7 +27,8 @@
       "expo-router",
       "expo-font",
       "expo-web-browser",
-      "expo-camera"
+      "expo-camera",
+      "expo-av"
     ],
     "experiments": {
       "typedRoutes": true
