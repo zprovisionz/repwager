@@ -68,6 +68,18 @@ export async function getOpenChallenges(limit = 20) {
   return data ?? [];
 }
 
+export async function getHotMatches(limit = 6): Promise<any[]> {
+  const { data, error } = await (supabase.from('matches') as any)
+    .select('id, exercise_type, wager_amount, mode, created_at, profiles!matches_challenger_id_fkey(username)')
+    .eq('status', 'pending')
+    .is('opponent_id', null)
+    .gt('expires_at', new Date().toISOString())
+    .order('wager_amount', { ascending: false })
+    .limit(limit);
+  if (error) return [];
+  return data ?? [];
+}
+
 export async function fileDispute(matchId: string, reason: string): Promise<Match> {
   const { data, error } = await (supabase.from('matches') as any)
     .update({ status: 'disputed', dispute_reason: reason })

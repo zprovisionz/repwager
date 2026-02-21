@@ -21,6 +21,8 @@ export interface Database {
           wins: number;
           losses: number;
           total_reps: number;
+          casual_match_count: number;
+          onboarding_shown: boolean;
           created_at: string;
           updated_at: string;
         };
@@ -117,6 +119,18 @@ export interface Database {
         };
         Insert: Omit<Database['public']['Tables']['notifications']['Row'], 'id' | 'created_at'>;
         Update: Partial<Database['public']['Tables']['notifications']['Insert']>;
+      };
+      push_tokens: {
+        Row: {
+          id: string;
+          user_id: string;
+          token: string;
+          platform: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['push_tokens']['Row'], 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Database['public']['Tables']['push_tokens']['Insert']>;
       };
       practice_sessions: {
         Row: {
