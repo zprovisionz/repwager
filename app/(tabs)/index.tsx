@@ -9,7 +9,7 @@ import { getUserMatches, getOpenChallenges, acceptMatch } from '@/services/match
 import { useToastStore } from '@/stores/toastStore';
 import MatchCard from '@/components/MatchCard';
 import Avatar from '@/components/Avatar';
-import { Plus, Zap, DollarSign, Flame, Target, Trophy } from 'lucide-react-native';
+import { Plus, Zap, DollarSign, Flame, Target, Trophy, Bell } from 'lucide-react-native';
 import type { Match } from '@/types/database';
 
 export default function HomeScreen() {
@@ -96,9 +96,17 @@ export default function HomeScreen() {
               <Text style={styles.greeting}>Hey, {profile?.display_name?.split(' ')[0] ?? 'Champ'}</Text>
               <Text style={styles.username}>@{profile?.username}</Text>
             </View>
-            <TouchableOpacity style={styles.newBtn} onPress={() => router.push('/challenge/create')}>
-              <Plus size={20} color={colors.textInverse} />
-            </TouchableOpacity>
+            <View style={styles.actionButtons}>
+              <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/(tabs)/leaderboard')}>
+                <Trophy size={20} color={colors.primary} />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/(tabs)/notifications')}>
+                <Bell size={20} color={colors.primary} />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.newBtn} onPress={() => router.push('/challenge/create')}>
+                <Plus size={20} color={colors.textInverse} />
+              </TouchableOpacity>
+            </View>
           </View>
 
           <View style={styles.statsRow}>
@@ -254,6 +262,21 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textSecondary,
     marginTop: 2,
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  iconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.bgCard,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   newBtn: {
     width: 40,
