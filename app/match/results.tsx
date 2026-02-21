@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Animated, TouchableOpacity, ScrollView } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,6 +9,8 @@ import { useToastStore } from '@/stores/toastStore';
 import { Trophy, Frown, Zap, Share2 } from 'lucide-react-native';
 import Button from '@/components/ui/Button';
 import { checkAndAwardBadges } from '@/services/badge.service';
+import { getMatch } from '@/services/match.service';
+import type { Match } from '@/types/database';
 
 function ConfettiPiece({ delay, color }: { delay: number; color: string }) {
   const anim = useRef(new Animated.Value(0)).current;
@@ -52,6 +54,8 @@ export default function ResultsScreen() {
   const { setActiveMatch } = useMatchStore();
   const { show: showToast } = useToastStore();
 
+  const [match, setMatch] = useState<Match | null>(null);
+
   const won = isWinner === 'true';
   const reps = parseInt(myReps ?? '0');
 
@@ -63,6 +67,12 @@ export default function ResultsScreen() {
       Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, tension: 60, friction: 6 }),
       Animated.timing(titleAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
     ]).start();
+
+    if (matchId) {
+      getMatch(matchId).then((m) => {
+        if (m) setMatch(m);
+      });
+    }
 
     if (session?.user && profile) {
       checkAndAwardBadges(session.user.id, profile, reps).then((badges) => {
@@ -76,7 +86,7 @@ export default function ResultsScreen() {
     return () => {
       setActiveMatch(null);
     };
-  }, []);
+  }, [matchId, session?.user?.id]);
 
   const confettiPieces = won
     ? Array.from({ length: 40 }, (_, i) => ({
@@ -104,6 +114,20 @@ export default function ResultsScreen() {
           <Text style={styles.repDisplay}>{reps}</Text>
           <Text style={styles.repSub}>REPS</Text>
         </Animated.View>
+
+        {match && (
+          <View style={styles.scoreComparison}>
+            <View style={styles.scoreColumn}>
+              <Text style={styles.scoreColumnLabel}>Your Reps</Text>
+              <Text style={[styles.scoreColumnValue, won && styles.winColor]}>{match.challenger_id === session?.user?.id ? match.challenger_reps : match.opponent_reps}</Text>
+            </View>
+            <Text style={styles.vsText}>vs</Text>
+            <View style={styles.scoreColumn}>
+              <Text style={styles.scoreColumnLabel}>Opponent Reps</Text>
+              <Text style={[styles.scoreColumnValue, !won && styles.winColor]}>{match.challenger_id === session?.user?.id ? match.opponent_reps : match.challenger_reps}</Text>
+            </View>
+          </View>
+        )}
 
         <View style={styles.statsCard}>
           <View style={styles.statRow}>
@@ -173,6 +197,38 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.textSecondary,
     letterSpacing: 6,
+  },
+  scoreComparison: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.xl,
+  },
+  scoreColumn: {
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  scoreColumnLabel: {
+    fontFamily: typography.fontBody,
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+  scoreColumnValue: {
+    fontFamily: typography.fontDisplay,
+    fontSize: 48,
+    color: colors.text,
+  },
+  vsText: {
+    fontFamily: typography.fontDisplayMedium,
+    fontSize: 14,
+    color: colors.textMuted,
+    marginHorizontal: spacing.md,
   },
   statsCard: {
     width: '100%',

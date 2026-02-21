@@ -63,7 +63,22 @@ export default function HomeScreen() {
     }
   }
 
-  const activeMatches = myMatches.filter((m) => ['accepted', 'in_progress'].includes(m.status));
+  // Categorize active matches by async submission state
+  const inProgressMatches = myMatches.filter((m) => ['accepted', 'in_progress'].includes(m.status));
+
+  const yourTurnMatches = inProgressMatches.filter((m) => {
+    const isChallenger = m.challenger_id === session?.user?.id;
+    const userSubmitted = isChallenger ? m.challenger_ready : m.opponent_ready;
+    return !userSubmitted;
+  });
+
+  const waitingMatches = inProgressMatches.filter((m) => {
+    const isChallenger = m.challenger_id === session?.user?.id;
+    const userSubmitted = isChallenger ? m.challenger_ready : m.opponent_ready;
+    const opponentSubmitted = isChallenger ? m.opponent_ready : m.challenger_ready;
+    return userSubmitted && !opponentSubmitted;
+  });
+
   const pastMatches = myMatches.filter((m) => ['completed', 'disputed', 'cancelled'].includes(m.status));
 
   return (
@@ -108,16 +123,36 @@ export default function HomeScreen() {
         </View>
       </LinearGradient>
 
-      {activeMatches.length > 0 && (
+      {/* YOUR TURN SECTION */}
+      {yourTurnMatches.length > 0 && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>ACTIVE MATCHES</Text>
+          <Text style={styles.sectionTitle}>YOUR TURN TO RECORD</Text>
           <View style={styles.list}>
-            {activeMatches.map((m) => (
+            {yourTurnMatches.map((m) => (
               <MatchCard
                 key={m.id}
                 match={m}
                 myUserId={session?.user?.id}
                 onPress={() => router.push({ pathname: '/match/[id]', params: { id: m.id } })}
+                submissionState="notSubmitted"
+              />
+            ))}
+          </View>
+        </View>
+      )}
+
+      {/* WAITING SECTION */}
+      {waitingMatches.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>WAITING FOR OPPONENT</Text>
+          <View style={styles.list}>
+            {waitingMatches.map((m) => (
+              <MatchCard
+                key={m.id}
+                match={m}
+                myUserId={session?.user?.id}
+                onPress={() => router.push({ pathname: '/match/[id]', params: { id: m.id } })}
+                submissionState="waitingForOpponent"
               />
             ))}
           </View>
@@ -135,7 +170,7 @@ export default function HomeScreen() {
           style={[styles.tabBtn, tab === 'mine' && styles.tabBtnActive]}
           onPress={() => setTab('mine')}
         >
-          <Text style={[styles.tabBtnText, tab === 'mine' && styles.tabBtnTextActive]}>My History</Text>
+          <Text style={[styles.tabBtnText, tab === 'mine' && styles.tabBtnTextActive]}>Match Results</Text>
         </TouchableOpacity>
       </View>
 
@@ -171,11 +206,12 @@ export default function HomeScreen() {
 
       {tab === 'mine' && (
         <View style={styles.section}>
+          <Text style={styles.sectionTitle}>MATCH RESULTS</Text>
           {pastMatches.length === 0 ? (
             <View style={styles.empty}>
               <Trophy size={36} color={colors.textMuted} />
-              <Text style={styles.emptyTitle}>No matches yet</Text>
-              <Text style={styles.emptySubtitle}>Accept or create a challenge to start</Text>
+              <Text style={styles.emptyTitle}>No matches completed yet</Text>
+              <Text style={styles.emptySubtitle}>Complete some challenges to see your results</Text>
             </View>
           ) : (
             <View style={styles.list}>
@@ -185,6 +221,7 @@ export default function HomeScreen() {
                   match={m}
                   myUserId={session?.user?.id}
                   onPress={() => router.push({ pathname: '/theatre/[id]', params: { id: m.id } })}
+                  submissionState="completed"
                 />
               ))}
             </View>

@@ -99,16 +99,24 @@ export async function fileDispute(matchId: string, reason: string): Promise<Matc
   return data as Match;
 }
 
-export async function setReady(matchId: string, userId: string, isChallenger: boolean): Promise<Match> {
-  const field = isChallenger ? 'challenger_ready' : 'opponent_ready';
-  const { data, error } = await (supabase.from('matches') as any)
-    .update({ [field]: true })
-    .eq('id', matchId)
-    .select()
-    .maybeSingle();
+export async function submitMatchScore(matchId: string, userId: string, reps: number): Promise<Match> {
+  const { data, error } = await (supabase.rpc as any)('submit_match_score', {
+    p_match_id: matchId,
+    p_user_id: userId,
+    p_reps: reps,
+  });
   if (error) throw error;
-  if (!data) throw new Error('Match not found');
   return data as Match;
+}
+
+export function isMatchExpired(match: Match): boolean {
+  if (!match.submission_deadline) return false;
+  return new Date() > new Date(match.submission_deadline);
+}
+
+export async function cleanupExpiredMatches(): Promise<void> {
+  const { error } = await (supabase.rpc as any)('handle_expired_matches');
+  if (error) throw error;
 }
 
 export function subscribeToMatch(matchId: string, callback: (match: Match) => void) {

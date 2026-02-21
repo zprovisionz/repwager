@@ -46,6 +46,10 @@ export interface Database {
           completed_at: string | null;
           expires_at: string;
           dispute_reason: string | null;
+          // NEW: Async match fields (2-hour submission window)
+          submission_deadline: string | null;
+          challenger_submitted_at: string | null;
+          opponent_submitted_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -145,6 +149,14 @@ export interface Database {
       cancel_match: {
         Args: { p_match_id: string };
         Returns: Database['public']['Tables']['matches']['Row'];
+      };
+      submit_match_score: {
+        Args: { p_match_id: string; p_user_id: string; p_reps: number };
+        Returns: Database['public']['Tables']['matches']['Row'];
+      };
+      handle_expired_matches: {
+        Args: {};
+        Returns: void;
       };
       record_practice_session: {
         Args: { p_user_id: string; p_exercise_type: string; p_reps: number; p_notes?: string };

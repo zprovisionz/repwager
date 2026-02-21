@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { colors, typography, spacing, radius } from '@/lib/theme';
-import { Zap, DollarSign, Clock, Trophy } from 'lucide-react-native';
+import { Zap, DollarSign, Clock, Trophy, AlertCircle, CheckCircle2, Hourglass } from 'lucide-react-native';
 import type { Match } from '@/types/database';
 import { EXERCISE_LABELS } from '@/lib/config';
 
@@ -9,6 +9,7 @@ interface MatchCardProps {
   onPress?: () => void;
   myUserId?: string;
   showChallenger?: boolean;
+  submissionState?: 'notSubmitted' | 'waitingForOpponent' | 'completed';
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -29,9 +30,25 @@ const STATUS_LABEL: Record<string, string> = {
   cancelled: 'Cancelled',
 };
 
-export default function MatchCard({ match, onPress, myUserId, showChallenger }: MatchCardProps) {
+export default function MatchCard({ match, onPress, myUserId, showChallenger, submissionState }: MatchCardProps) {
   const isMyMatch = match.challenger_id === myUserId || match.opponent_id === myUserId;
   const statusColor = STATUS_COLOR[match.status] ?? colors.textMuted;
+
+  // Calculate time remaining to submission deadline
+  const getTimeRemaining = () => {
+    if (!match.submission_deadline) return '';
+    const deadlineTime = new Date(match.submission_deadline).getTime();
+    const nowTime = new Date().getTime();
+    const secondsLeft = Math.max(0, Math.floor((deadlineTime - nowTime) / 1000));
+
+    const hours = Math.floor(secondsLeft / 3600);
+    const minutes = Math.floor((secondsLeft % 3600) / 60);
+
+    if (hours > 0) {
+      return `${hours}h ${minutes}m left`;
+    }
+    return `${minutes}m left`;
+  };
 
   return (
     <TouchableOpacity onPress={onPress} disabled={!onPress} activeOpacity={0.8}>
@@ -53,6 +70,18 @@ export default function MatchCard({ match, onPress, myUserId, showChallenger }: 
           </View>
           {showChallenger && match.profiles && (
             <Text style={styles.challenger}>@{match.profiles.username}</Text>
+          )}
+          {submissionState === 'notSubmitted' && (
+            <View style={[styles.submissionBadge, { backgroundColor: colors.primary + '22', borderColor: colors.primary }]}>
+              <Zap size={12} color={colors.primary} />
+              <Text style={[styles.submissionText, { color: colors.primary }]}>Ready to record</Text>
+            </View>
+          )}
+          {submissionState === 'waitingForOpponent' && (
+            <View style={[styles.submissionBadge, { backgroundColor: colors.accent + '22', borderColor: colors.accent }]}>
+              <Hourglass size={12} color={colors.accent} />
+              <Text style={[styles.submissionText, { color: colors.accent }]}>Waiting...</Text>
+            </View>
           )}
           {match.status === 'completed' && match.winner_id && (
             <View style={styles.winnerRow}>
@@ -153,5 +182,19 @@ const styles = StyleSheet.create({
     fontFamily: typography.fontBody,
     fontSize: 12,
     color: colors.textMuted,
+  },
+  submissionBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: radius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderWidth: 1,
+  },
+  submissionText: {
+    fontFamily: typography.fontBodyMedium,
+    fontSize: 11,
+    letterSpacing: 0.5,
   },
 });

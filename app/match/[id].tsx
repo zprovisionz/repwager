@@ -6,15 +6,15 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useAuthStore } from '@/stores/authStore';
 import { useMatchStore } from '@/stores/matchStore';
 import { useToastStore } from '@/stores/toastStore';
-import { getMatch, startMatch, completeMatch, setReady, subscribeToMatch } from '@/services/match.service';
+import { getMatch, submitMatchScore, subscribeToMatch, isMatchExpired } from '@/services/match.service';
 import { usePoseDetection } from '@/hooks/usePoseDetection';
 import { useMatchTimer } from '@/hooks/useMatchTimer';
 import { colors, typography, spacing, radius } from '@/lib/theme';
 import { EXERCISE_LABELS } from '@/lib/config';
-import { X, Zap } from 'lucide-react-native';
+import { X, Zap, Clock, Check, AlertCircle } from 'lucide-react-native';
 import type { Match } from '@/types/database';
 
-type MatchPhase = 'loading' | 'waiting' | 'countdown' | 'active' | 'finishing';
+type MatchPhase = 'loading' | 'pre_record' | 'recording' | 'submitted' | 'expired' | 'results';
 
 export default function MatchScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -26,17 +26,17 @@ export default function MatchScreen() {
 
   const [phase, setPhase] = useState<MatchPhase>('loading');
   const [match, setMatch] = useState<Match | null>(null);
-  const [countdown, setCountdown] = useState(3);
   const [permission, requestPermission] = useCameraPermissions();
-  const countdownAnim = useRef(new Animated.Value(1)).current;
-
-  console.log('[MatchScreen] render — phase:', phase, '| permission:', permission ? `granted=${permission.granted} canAsk=${permission.canAskAgain}` : 'null (loading)');
-  const repAnim = useRef(new Animated.Value(1)).current;
   const subscriptionRef = useRef<any>(null);
 
   const isChallenger = match?.challenger_id === session?.user?.id;
   const myReps = activeMatch?.myReps ?? 0;
   const timeLeft = activeMatch?.timeLeft ?? 60;
+
+  // Deadline countdown state
+  const [secondsUntilDeadline, setSecondsUntilDeadline] = useState(0);
+
+  const repAnim = useRef(new Animated.Value(1)).current;
 
   const handleRepCounted = useCallback((total: number) => {
     console.log('[MatchScreen] handleRepCounted — total:', total);
@@ -50,60 +50,72 @@ export default function MatchScreen() {
   const { repCount, isReady: poseReady, processFrame, manualIncrement, reset: resetPose } = usePoseDetection({
     exerciseType: match?.exercise_type ?? 'push_ups',
     onRepCounted: handleRepCounted,
-    enabled: phase === 'active',
+    enabled: phase === 'recording',
   });
 
-  const handleMatchComplete = useCallback(async () => {
-    if (!match || !session?.user) return;
-    setPhase('finishing');
+  // Determine current phase based on match state
+  const determinePhase = (m: Match): MatchPhase => {
+    if (!session?.user) return 'loading';
 
-    const finalReps = useMatchStore.getState().activeMatch?.myReps ?? 0;
-    const challengerReps = isChallenger ? finalReps : (activeMatch?.opponentReps ?? 0);
-    const opponentReps = isChallenger ? (activeMatch?.opponentReps ?? 0) : finalReps;
-
-    try {
-      const winnerId = challengerReps >= opponentReps ? match.challenger_id : (match.opponent_id ?? match.challenger_id);
-      await completeMatch(match.id, winnerId, challengerReps, opponentReps);
-
-      router.replace({
-        pathname: '/match/results',
-        params: {
-          matchId: match.id,
-          myReps: finalReps.toString(),
-          isWinner: (session.user.id === winnerId).toString(),
-        },
-      });
-    } catch (err) {
-      showToast({ type: 'error', title: 'Error completing match' });
+    // Check if expired
+    if (isMatchExpired(m)) {
+      return 'expired';
     }
-  }, [match, session, isChallenger, activeMatch, router, showToast]);
 
-  const { start: startTimer } = useMatchTimer({ onComplete: handleMatchComplete });
+    // Check if completed (both submitted, winner determined)
+    if (m.status === 'completed') {
+      return 'results';
+    }
 
+    // Check if current user has submitted
+    const userSubmitted = isChallenger ? m.challenger_ready : m.opponent_ready;
+    if (userSubmitted) {
+      return 'submitted';
+    }
+
+    // Not submitted yet
+    return 'pre_record';
+  };
+
+  // Auto-submit when timer expires (60 seconds)
+  const handleAutoSubmit = useCallback(async () => {
+    if (!match || !session?.user) return;
+    const finalReps = useMatchStore.getState().activeMatch?.myReps ?? 0;
+    await submitScore(finalReps);
+  }, [match, session]);
+
+  const { start: startTimer } = useMatchTimer({ onComplete: handleAutoSubmit });
+
+  // Fetch match and setup realtime subscription
   useEffect(() => {
     if (!id || !session?.user) return;
     loadMatch();
-  }, [id]);
+  }, [id, session]);
 
   async function loadMatch() {
     console.log('[MatchScreen] loadMatch — id:', id, '| user:', session?.user?.id);
     try {
       const m = await getMatch(id!);
       if (!m) throw new Error('Match not found');
-      console.log('[MatchScreen] loadMatch — fetched match:', { id: m.id, status: m.status, exercise: m.exercise_type, challengerReady: m.challenger_ready, opponentReady: m.opponent_ready });
+      console.log('[MatchScreen] loadMatch — fetched match:', { id: m.id, status: m.status, exercise: m.exercise_type });
       setMatch(m);
       setActiveMatch(m);
 
-      if (m.status === 'accepted' || m.status === 'in_progress') {
-        setPhase('waiting');
-      }
+      const initialPhase = determinePhase(m);
+      setPhase(initialPhase);
 
+      // Setup realtime subscription to watch for opponent submission
       subscriptionRef.current = subscribeToMatch(m.id, (updated) => {
-        console.log('[MatchScreen] subscribeToMatch update — status:', updated.status, '| challengerReady:', updated.challenger_ready, '| opponentReady:', updated.opponent_ready);
+        console.log('[MatchScreen] subscribeToMatch update — status:', updated.status, '| challenger_ready:', updated.challenger_ready, '| opponent_ready:', updated.opponent_ready);
         setMatch(updated);
-        if (updated.challenger_ready && updated.opponent_ready && phase !== 'active') {
-          console.log('[MatchScreen] both players ready — starting countdown');
-          beginCountdown();
+
+        // Auto-advance phase based on updated match state
+        const newPhase = determinePhase(updated);
+        setPhase(newPhase);
+
+        // If status changed to completed, show results
+        if (updated.status === 'completed') {
+          showToast({ type: 'success', title: 'Match completed!' });
         }
       });
     } catch (err) {
@@ -113,63 +125,86 @@ export default function MatchScreen() {
     }
   }
 
+  // Cleanup subscription on unmount
   useEffect(() => {
     return () => {
       subscriptionRef.current?.unsubscribe();
     };
   }, []);
 
-  async function handleReady() {
-    if (!match || !session?.user) return;
-    console.log('[MatchScreen] handleReady — matchId:', match.id, '| isChallenger:', isChallenger);
+  // Update deadline countdown every second
+  useEffect(() => {
+    if (!match || phase === 'loading' || phase === 'results') return;
+
+    const interval = setInterval(() => {
+      if (match?.submission_deadline) {
+        const deadlineTime = new Date(match.submission_deadline).getTime();
+        const nowTime = new Date().getTime();
+        const secondsLeft = Math.max(0, Math.floor((deadlineTime - nowTime) / 1000));
+        setSecondsUntilDeadline(secondsLeft);
+
+        // If deadline passed, phase will be determined as 'expired' on next subscription update
+        if (secondsLeft <= 0 && phase !== 'expired') {
+          setPhase('expired');
+        }
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [match, phase]);
+
+  // Submit score to database
+  const submitScore = async (reps: number) => {
+    if (!match || !session?.user) {
+      showToast({ type: 'error', title: 'Error: Missing match or user' });
+      return;
+    }
+
     try {
-      const updated = await setReady(match.id, session.user.id, isChallenger);
-      console.log('[MatchScreen] handleReady — updated ready flags:', { challengerReady: updated.challenger_ready, opponentReady: updated.opponent_ready });
+      const updated = await submitMatchScore(match.id, session.user.id, reps);
+      console.log('[MatchScreen] submitScore success:', { id: updated.id, status: updated.status });
       setMatch(updated);
-      if (updated.challenger_ready && updated.opponent_ready) {
-        console.log('[MatchScreen] handleReady — both ready, starting countdown');
-        beginCountdown();
+
+      // If completed, show results
+      if (updated.status === 'completed') {
+        setPhase('results');
+      } else {
+        // Move to submitted phase, wait for opponent
+        setPhase('submitted');
       }
     } catch (err) {
-      console.error('[MatchScreen] handleReady error:', err);
-      showToast({ type: 'error', title: 'Could not mark ready' });
+      console.error('[MatchScreen] submitScore error:', err);
+      showToast({ type: 'error', title: 'Failed to submit score' });
     }
-  }
+  };
 
-  function beginCountdown() {
-    console.log('[MatchScreen] beginCountdown — starting 3…2…1');
-    setPhase('countdown');
-    setCountdown(3);
-    let count = 3;
-    const tick = () => {
-      Animated.sequence([
-        Animated.timing(countdownAnim, { toValue: 1.5, duration: 200, useNativeDriver: true }),
-        Animated.timing(countdownAnim, { toValue: 0.8, duration: 700, useNativeDriver: true }),
-      ]).start();
+  // Start recording
+  const handleStartRecording = () => {
+    console.log('[MatchScreen] handleStartRecording');
+    setPhase('recording');
+    resetPose();
+    startTimer();
+  };
 
-      if (count > 1) {
-        count--;
-        setCountdown(count);
-        setTimeout(tick, 1000);
-      } else {
-        setTimeout(() => {
-          console.log('[MatchScreen] beginCountdown — GO! setting phase=active');
-          setPhase('active');
-          resetPose();
-          startTimer();
-          if (match) startMatch(match.id).catch((err) => console.error('[MatchScreen] startMatch error:', err));
-        }, 1000);
-      }
-    };
-    tick();
-  }
-
+  // Format time display
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60);
     const sec = s % 60;
     return `${m}:${sec.toString().padStart(2, '0')}`;
   };
 
+  // Format deadline countdown
+  const formatDeadline = (seconds: number) => {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    if (hours > 0) {
+      return `${hours}h ${minutes}m`;
+    }
+    return `${minutes}m ${secs}s`;
+  };
+
+  // Camera permission check
   if (!permission) return <View style={styles.fill} />;
 
   if (!permission.granted) {
@@ -195,6 +230,7 @@ export default function MatchScreen() {
       )}
 
       <View style={[StyleSheet.absoluteFill, styles.overlay]}>
+        {/* Top Bar */}
         <View style={[styles.topBar, { paddingTop: insets.top + spacing.sm }]}>
           <TouchableOpacity onPress={() => router.back()} style={styles.closeBtn}>
             <X size={20} color={colors.text} />
@@ -209,64 +245,160 @@ export default function MatchScreen() {
           </View>
         </View>
 
-        {phase === 'active' && (
-          <View style={styles.timerRow}>
-            <Text style={[styles.timer, timeLeft <= 10 ? styles.timerUrgent : null]}>
-              {formatTime(timeLeft)}
-            </Text>
+        {/* Center Content based on Phase */}
+
+        {/* PRE-RECORD PHASE: Show exercise info + deadline + start button */}
+        {phase === 'pre_record' && match && (
+          <View style={styles.centerContent}>
+            <View style={styles.infoCard}>
+              <Text style={styles.phaseTitle}>Get Ready to Record</Text>
+              <Text style={styles.phaseSubtitle}>{EXERCISE_LABELS[match.exercise_type]}</Text>
+
+              <View style={styles.infoRow}>
+                <Clock size={16} color={colors.accent} />
+                <Text style={styles.infoText}>Deadline in {formatDeadline(secondsUntilDeadline)}</Text>
+              </View>
+
+              <View style={styles.infoRow}>
+                <Zap size={16} color={colors.primary} />
+                <Text style={styles.infoText}>60 seconds to record</Text>
+              </View>
+
+              <Text style={styles.infoDescription}>Tap START when ready to begin your 60-second recording.</Text>
+            </View>
           </View>
         )}
 
-        {phase === 'countdown' && (
-          <View style={styles.countdownWrap}>
-            <Animated.Text style={[styles.countdownNum, { transform: [{ scale: countdownAnim }] }]}>
-              {countdown}
-            </Animated.Text>
-            <Text style={styles.countdownLabel}>GET READY</Text>
-          </View>
-        )}
-
-        {phase === 'waiting' && (
-          <View style={styles.waitingWrap}>
-            <Text style={styles.waitingTitle}>
-              {isChallenger
-                ? match?.challenger_ready ? 'Waiting for opponent...' : 'Tap ready when set!'
-                : match?.opponent_ready ? 'Waiting for challenger...' : 'Tap ready when set!'}
-            </Text>
-          </View>
-        )}
-
-        {phase === 'loading' && (
-          <View style={styles.waitingWrap}>
-            <Text style={styles.waitingTitle}>Loading match...</Text>
-          </View>
-        )}
-
-        {phase === 'active' && (
-          <View style={styles.repCountWrap}>
-            <Animated.Text style={[styles.repCount, { transform: [{ scale: repAnim }] }]}>
-              {myReps}
-            </Animated.Text>
-            <Text style={styles.repLabel}>REPS</Text>
-          </View>
-        )}
-
-        <View style={[styles.bottomBar, { paddingBottom: insets.bottom + spacing.md }]}>
-          {phase === 'waiting' && (
-            <TouchableOpacity
-              style={[styles.readyBtn, (isChallenger ? match?.challenger_ready : match?.opponent_ready) ? styles.readyBtnDone : null]}
-              onPress={handleReady}
-              disabled={isChallenger ? match?.challenger_ready : match?.opponent_ready}
-            >
-              <Text style={styles.readyBtnText}>
-                {(isChallenger ? match?.challenger_ready : match?.opponent_ready) ? 'READY!' : 'TAP TO READY UP'}
+        {/* RECORDING PHASE: Show timer + rep count */}
+        {phase === 'recording' && (
+          <>
+            <View style={styles.timerRow}>
+              <Text style={[styles.timer, timeLeft <= 10 ? styles.timerUrgent : null]}>
+                {formatTime(timeLeft)}
               </Text>
+            </View>
+
+            <View style={styles.repCountWrap}>
+              <Animated.Text style={[styles.repCount, { transform: [{ scale: repAnim }] }]}>
+                {myReps}
+              </Animated.Text>
+              <Text style={styles.repLabel}>REPS</Text>
+            </View>
+          </>
+        )}
+
+        {/* SUBMITTED PHASE: Show your reps + waiting for opponent + deadline */}
+        {phase === 'submitted' && (
+          <View style={styles.centerContent}>
+            <View style={styles.submitCard}>
+              <View style={styles.submittedBadge}>
+                <Check size={20} color={colors.success} />
+                <Text style={styles.submittedText}>SUBMITTED</Text>
+              </View>
+
+              <View style={styles.scoreDisplay}>
+                <Text style={styles.scoreLabel}>Your Reps</Text>
+                <Text style={styles.scoreBig}>{myReps}</Text>
+              </View>
+
+              <View style={styles.waitingBox}>
+                <Text style={styles.waitingText}>Waiting for opponent...</Text>
+              </View>
+
+              <View style={styles.deadlineBox}>
+                <Clock size={14} color={colors.accent} />
+                <Text style={styles.deadlineText}>Opponent has {formatDeadline(secondsUntilDeadline)} to submit</Text>
+              </View>
+
+              <Text style={styles.hiddenOpponentText}>Opponent's score is hidden until they submit</Text>
+            </View>
+          </View>
+        )}
+
+        {/* EXPIRED PHASE: Deadline passed */}
+        {phase === 'expired' && (
+          <View style={styles.centerContent}>
+            <View style={styles.expiredCard}>
+              <AlertCircle size={48} color={colors.error} />
+              <Text style={styles.expiredTitle}>Deadline Passed</Text>
+              <Text style={styles.expiredText}>
+                The submission window has closed. Both players have been refunded their wager.
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* RESULTS PHASE: Show both scores and winner */}
+        {phase === 'results' && match && (
+          <View style={styles.centerContent}>
+            <View style={styles.resultsCard}>
+              <Text style={styles.resultsTitle}>Match Results</Text>
+
+              <View style={styles.scoreComparison}>
+                <View style={styles.scoreColumn}>
+                  <Text style={styles.scoreColumnLabel}>You</Text>
+                  <Text style={[styles.scoreColumnValue, isChallenger && myReps > (match.opponent_reps ?? 0) ? styles.scoreColumnWinner : null]}>
+                    {myReps}
+                  </Text>
+                  <Text style={styles.scoreColumnUnit}>reps</Text>
+                </View>
+
+                <Text style={styles.vsText}>vs</Text>
+
+                <View style={styles.scoreColumn}>
+                  <Text style={styles.scoreColumnLabel}>Opponent</Text>
+                  <Text style={[styles.scoreColumnValue, !isChallenger && (match.opponent_reps ?? 0) > myReps ? styles.scoreColumnWinner : null]}>
+                    {match.opponent_reps ?? 0}
+                  </Text>
+                  <Text style={styles.scoreColumnUnit}>reps</Text>
+                </View>
+              </View>
+
+              <View style={styles.winnerRow}>
+                {match.winner_id === session?.user?.id ? (
+                  <>
+                    <Text style={styles.winnerText}>🎉 You Won! 🎉</Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.loserText}>😢 Better luck next time</Text>
+                  </>
+                )}
+              </View>
+            </View>
+          </View>
+        )}
+
+        {/* LOADING PHASE */}
+        {phase === 'loading' && (
+          <View style={styles.centerContent}>
+            <Text style={styles.loadingText}>Loading match...</Text>
+          </View>
+        )}
+
+        {/* Bottom Bar with Action Buttons */}
+        <View style={[styles.bottomBar, { paddingBottom: insets.bottom + spacing.md }]}>
+          {phase === 'pre_record' && (
+            <TouchableOpacity style={styles.actionBtn} onPress={handleStartRecording}>
+              <Text style={styles.actionBtnText}>START RECORDING</Text>
             </TouchableOpacity>
           )}
 
-          {phase === 'active' && (
+          {phase === 'recording' && (
             <TouchableOpacity style={styles.devBtn} onPress={manualIncrement}>
               <Text style={styles.devBtnText}>TAP TO COUNT REP</Text>
+            </TouchableOpacity>
+          )}
+
+          {phase === 'expired' && (
+            <TouchableOpacity style={styles.actionBtn} onPress={() => router.back()}>
+              <Text style={styles.actionBtnText}>BACK TO HOME</Text>
+            </TouchableOpacity>
+          )}
+
+          {phase === 'results' && (
+            <TouchableOpacity style={styles.actionBtn} onPress={() => router.push('/')}>
+              <Text style={styles.actionBtnText}>BACK TO HOME</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -334,6 +466,55 @@ const styles = StyleSheet.create({
     color: colors.accent,
     letterSpacing: 1,
   },
+
+  // Center content wrapper
+  centerContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+
+  // PRE-RECORD PHASE
+  infoCard: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: spacing.md,
+  },
+  phaseTitle: {
+    fontFamily: typography.fontDisplayMedium,
+    fontSize: 20,
+    color: colors.text,
+    textAlign: 'center',
+  },
+  phaseSubtitle: {
+    fontFamily: typography.fontBodyBold,
+    fontSize: 16,
+    color: colors.primary,
+    textAlign: 'center',
+  },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  infoText: {
+    fontFamily: typography.fontBody,
+    fontSize: 14,
+    color: colors.textSecondary,
+  },
+  infoDescription: {
+    fontFamily: typography.fontBody,
+    fontSize: 13,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+  },
+
+  // RECORDING PHASE
   timerRow: {
     alignItems: 'center',
     marginTop: spacing.lg,
@@ -346,38 +527,6 @@ const styles = StyleSheet.create({
   },
   timerUrgent: {
     color: colors.error,
-  },
-  countdownWrap: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  countdownNum: {
-    fontFamily: typography.fontDisplay,
-    fontSize: 120,
-    color: colors.primary,
-    textShadowColor: colors.primary,
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 24,
-  },
-  countdownLabel: {
-    fontFamily: typography.fontDisplayMedium,
-    fontSize: 16,
-    color: colors.textSecondary,
-    letterSpacing: 4,
-    marginTop: spacing.sm,
-  },
-  waitingWrap: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.xl,
-  },
-  waitingTitle: {
-    fontFamily: typography.fontDisplayMedium,
-    fontSize: 22,
-    color: colors.text,
-    textAlign: 'center',
   },
   repCountWrap: {
     flex: 1,
@@ -398,21 +547,189 @@ const styles = StyleSheet.create({
     color: colors.successDark,
     letterSpacing: 6,
   },
+
+  // SUBMITTED PHASE
+  submitCard: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: spacing.md,
+    width: '100%',
+  },
+  submittedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: 'rgba(34,197,94,0.1)',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    alignSelf: 'center',
+  },
+  submittedText: {
+    fontFamily: typography.fontBodyBold,
+    fontSize: 12,
+    color: colors.success,
+    letterSpacing: 1,
+  },
+  scoreDisplay: {
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.md,
+  },
+  scoreLabel: {
+    fontFamily: typography.fontBody,
+    fontSize: 13,
+    color: colors.textMuted,
+  },
+  scoreBig: {
+    fontFamily: typography.fontDisplay,
+    fontSize: 56,
+    color: colors.primary,
+  },
+  waitingBox: {
+    backgroundColor: 'rgba(0,212,255,0.05)',
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+  },
+  waitingText: {
+    fontFamily: typography.fontBodyMedium,
+    fontSize: 14,
+    color: colors.primary,
+    textAlign: 'center',
+  },
+  deadlineBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: 'rgba(255,184,0,0.05)',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+  },
+  deadlineText: {
+    fontFamily: typography.fontBody,
+    fontSize: 12,
+    color: colors.accent,
+  },
+  hiddenOpponentText: {
+    fontFamily: typography.fontBody,
+    fontSize: 12,
+    color: colors.textMuted,
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+
+  // EXPIRED PHASE
+  expiredCard: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.lg,
+    padding: spacing.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  expiredTitle: {
+    fontFamily: typography.fontDisplayMedium,
+    fontSize: 20,
+    color: colors.error,
+  },
+  expiredText: {
+    fontFamily: typography.fontBody,
+    fontSize: 14,
+    color: colors.textSecondary,
+    textAlign: 'center',
+  },
+
+  // RESULTS PHASE
+  resultsCard: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: spacing.lg,
+    width: '100%',
+  },
+  resultsTitle: {
+    fontFamily: typography.fontDisplayMedium,
+    fontSize: 18,
+    color: colors.text,
+    textAlign: 'center',
+  },
+  scoreComparison: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    paddingVertical: spacing.lg,
+  },
+  scoreColumn: {
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  scoreColumnLabel: {
+    fontFamily: typography.fontBody,
+    fontSize: 13,
+    color: colors.textMuted,
+  },
+  scoreColumnValue: {
+    fontFamily: typography.fontDisplay,
+    fontSize: 48,
+    color: colors.text,
+  },
+  scoreColumnWinner: {
+    color: colors.success,
+  },
+  scoreColumnUnit: {
+    fontFamily: typography.fontBody,
+    fontSize: 11,
+    color: colors.textMuted,
+  },
+  vsText: {
+    fontFamily: typography.fontDisplayMedium,
+    fontSize: 14,
+    color: colors.textMuted,
+    marginHorizontal: spacing.md,
+  },
+  winnerRow: {
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+  },
+  winnerText: {
+    fontFamily: typography.fontDisplayMedium,
+    fontSize: 20,
+    color: colors.success,
+  },
+  loserText: {
+    fontFamily: typography.fontBodyBold,
+    fontSize: 16,
+    color: colors.textSecondary,
+  },
+
+  // LOADING PHASE
+  loadingText: {
+    fontFamily: typography.fontBodyMedium,
+    fontSize: 16,
+    color: colors.textSecondary,
+  },
+
+  // Bottom Bar
   bottomBar: {
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.md,
     backgroundColor: 'rgba(8,12,20,0.7)',
   },
-  readyBtn: {
+  actionBtn: {
     backgroundColor: colors.primary,
     borderRadius: radius.md,
     paddingVertical: spacing.md,
     alignItems: 'center',
   },
-  readyBtnDone: {
-    backgroundColor: colors.success,
-  },
-  readyBtnText: {
+  actionBtnText: {
     fontFamily: typography.fontDisplay,
     fontSize: 14,
     color: colors.textInverse,
