@@ -8,12 +8,32 @@ import {
   disposePoseDetector,
   getAverageConfidence,
 } from '@/services/mediapipe.service';
-import { DEV_MODE_ENABLED } from '@/lib/config';
+import {
+  DEV_MODE_ENABLED,
+  KALMAN_Q,
+  KALMAN_R,
+  ANGLE_SMOOTHING_FRAMES,
+  REP_VELOCITY_MIN_SECONDS,
+  REP_VELOCITY_MAX_SECONDS,
+  MULTI_REP_VALIDATION_WINDOW,
+  MULTI_REP_QUALITY_THRESHOLD,
+} from '@/lib/config';
+import { KalmanFilter } from '@/utils/kalmanFilter';
 
 interface UsePoseDetectionOptions {
   exerciseType: ExerciseType;
   onRepCounted: (totalReps: number) => void;
   enabled: boolean;
+}
+
+// Phase 3: Temporal smoothing data
+interface TemporalSmoothingData {
+  frameCount: number;
+  angleHistory: number[];
+  kalmanFilter: KalmanFilter;
+  lastRepStartTime: number;
+  lastRepEndTime: number;
+  multiRepQualityHistory: number[];
 }
 
 export function usePoseDetection({ exerciseType, onRepCounted, enabled }: UsePoseDetectionOptions) {
@@ -23,10 +43,21 @@ export function usePoseDetection({ exerciseType, onRepCounted, enabled }: UsePos
   const [detectionError, setDetectionError] = useState<string | null>(null);
   const [lastFormQuality, setLastFormQuality] = useState<number | null>(null);
   const [lastFormIssues, setLastFormIssues] = useState<string[]>([]);
+  const [velocityWarning, setVelocityWarning] = useState<string | null>(null);
   const throttle = useRef(new RepThrottle());
   const repCountRef = useRef(0);
   const phaseRef = useRef<RepPhase>('up');
   const detectorInitRef = useRef(false);
+
+  // Phase 3: Temporal smoothing refs
+  const temporalDataRef = useRef<TemporalSmoothingData>({
+    frameCount: 0,
+    angleHistory: [],
+    kalmanFilter: new KalmanFilter(KALMAN_Q, KALMAN_R),
+    lastRepStartTime: 0,
+    lastRepEndTime: 0,
+    multiRepQualityHistory: [],
+  });
 
   useEffect(() => {
     if (detectorInitRef.current) return;
@@ -75,13 +106,93 @@ export function usePoseDetection({ exerciseType, onRepCounted, enabled }: UsePos
     [enabled, isReady]
   );
 
+  // Phase 3: Helper function to get smoothed angle using temporal averaging
+  const getSmoothedAngle = useCallback((newAngle: number): number => {
+    const temporal = temporalDataRef.current;
+
+    // Update Kalman filter with new measurement
+    const kalmanSmoothed = temporal.kalmanFilter.update(newAngle);
+
+    // Add to history for moving average
+    temporal.angleHistory.push(kalmanSmoothed);
+    if (temporal.angleHistory.length > ANGLE_SMOOTHING_FRAMES) {
+      temporal.angleHistory.shift();
+    }
+
+    // Calculate moving average
+    const average = temporal.angleHistory.reduce((a, b) => a + b, 0) / temporal.angleHistory.length;
+
+    if (DEV_MODE_ENABLED && temporal.frameCount % 30 === 0) {
+      console.log('[usePoseDetection] Smoothed angle - raw:', newAngle.toFixed(1), 'kalman:', kalmanSmoothed.toFixed(1), 'moving avg:', average.toFixed(1));
+    }
+
+    return average;
+  }, []);
+
+  // Phase 3: Helper function to detect velocity anomalies
+  const checkRepVelocity = useCallback((): string | null => {
+    const temporal = temporalDataRef.current;
+    const now = Date.now();
+
+    // Only check velocity if we just completed a rep
+    if (temporal.lastRepEndTime === 0) return null;
+
+    const repDurationSeconds = (now - temporal.lastRepStartTime) / 1000;
+
+    if (repDurationSeconds < REP_VELOCITY_MIN_SECONDS) {
+      return `Rep too fast (${repDurationSeconds.toFixed(2)}s) - possible bouncing`;
+    }
+    if (repDurationSeconds > REP_VELOCITY_MAX_SECONDS) {
+      return `Rep too slow (${repDurationSeconds.toFixed(2)}s) - possible stalling`;
+    }
+
+    return null;
+  }, []);
+
+  // Phase 3: Helper function to validate multi-rep quality
+  const isMultiRepQualityValid = useCallback((newQuality: number): boolean => {
+    const temporal = temporalDataRef.current;
+    temporal.multiRepQualityHistory.push(newQuality);
+
+    if (temporal.multiRepQualityHistory.length > MULTI_REP_VALIDATION_WINDOW) {
+      temporal.multiRepQualityHistory.shift();
+    }
+
+    // If we have a full window, check average quality
+    if (temporal.multiRepQualityHistory.length === MULTI_REP_VALIDATION_WINDOW) {
+      const avgQuality = temporal.multiRepQualityHistory.reduce((a, b) => a + b, 0) / temporal.multiRepQualityHistory.length;
+      const isValid = avgQuality >= MULTI_REP_QUALITY_THRESHOLD * 100;
+
+      if (DEV_MODE_ENABLED) {
+        console.log('[usePoseDetection] Multi-rep quality check - avg:', avgQuality.toFixed(1), '% - valid:', isValid);
+      }
+
+      return isValid;
+    }
+
+    // Not enough history yet, allow
+    return true;
+  }, []);
+
   const processFrameData = useCallback(
     (pose: { keypoints: { name: string; x: number; y: number; score?: number }[] }) => {
       if (!enabled) return;
 
+      const temporal = temporalDataRef.current;
+      temporal.frameCount += 1;
+
       const { newPhase, repCounted, formQuality, formIssues } = analyzeRep(pose, exerciseType, phaseRef.current);
 
       if (newPhase !== phaseRef.current) {
+        // Phase transition detected
+        if (newPhase === 'down') {
+          // Just started going down (down phase = active rep)
+          temporal.lastRepStartTime = Date.now();
+        } else if (newPhase === 'up') {
+          // Just completed rep (back to up phase)
+          temporal.lastRepEndTime = Date.now();
+        }
+
         phaseRef.current = newPhase;
         setPhase(newPhase);
       }
@@ -90,7 +201,19 @@ export function usePoseDetection({ exerciseType, onRepCounted, enabled }: UsePos
         if (formQuality !== undefined) {
           setLastFormQuality(formQuality);
           setLastFormIssues(formIssues ?? []);
+
+          // Phase 3: Check velocity and multi-rep quality
+          const velocityWarning = checkRepVelocity();
+          setVelocityWarning(velocityWarning);
+
+          // Phase 3: Validate multi-rep quality
+          const multiRepValid = isMultiRepQualityValid(formQuality);
+
+          if (!multiRepValid && DEV_MODE_ENABLED) {
+            console.log('[usePoseDetection] Multi-rep validation rejected rep due to low avg quality');
+          }
         }
+
         const allowed = throttle.current.canCount();
         if (allowed) {
           repCountRef.current += 1;
@@ -99,7 +222,7 @@ export function usePoseDetection({ exerciseType, onRepCounted, enabled }: UsePos
         }
       }
     },
-    [enabled, exerciseType, onRepCounted]
+    [enabled, exerciseType, onRepCounted, checkRepVelocity, isMultiRepQualityValid]
   );
 
   const processFrame = useCallback(
@@ -123,7 +246,17 @@ export function usePoseDetection({ exerciseType, onRepCounted, enabled }: UsePos
     setPhase('up');
     setLastFormQuality(null);
     setLastFormIssues([]);
+    setVelocityWarning(null);
     throttle.current.reset();
+
+    // Phase 3: Reset temporal smoothing data
+    const temporal = temporalDataRef.current;
+    temporal.frameCount = 0;
+    temporal.angleHistory = [];
+    temporal.kalmanFilter.reset();
+    temporal.lastRepStartTime = 0;
+    temporal.lastRepEndTime = 0;
+    temporal.multiRepQualityHistory = [];
   }, []);
 
   return {
@@ -138,5 +271,6 @@ export function usePoseDetection({ exerciseType, onRepCounted, enabled }: UsePos
     detectionError,
     lastFormQuality,
     lastFormIssues,
+    velocityWarning, // Phase 3
   };
 }

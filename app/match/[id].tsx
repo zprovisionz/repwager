@@ -9,6 +9,7 @@ import { useToastStore } from '@/stores/toastStore';
 import { getMatch, submitMatchScore, subscribeToMatch, isMatchExpired } from '@/services/match.service';
 import { usePoseDetection } from '@/hooks/usePoseDetection';
 import { useMatchTimer } from '@/hooks/useMatchTimer';
+import { FormFeedback } from '@/components/FormFeedback'; // Phase 4
 import { colors, typography, spacing, radius } from '@/lib/theme';
 import { EXERCISE_LABELS, DEV_MODE_ENABLED } from '@/lib/config';
 import { X, Zap, Clock, Check, AlertCircle } from 'lucide-react-native';
@@ -57,6 +58,7 @@ export default function MatchScreen() {
     detectionError,
     lastFormQuality,
     lastFormIssues,
+    velocityWarning, // Phase 3
   } = usePoseDetection({
     exerciseType: match?.exercise_type ?? 'push_ups',
     onRepCounted: handleRepCounted,
@@ -319,20 +321,15 @@ export default function MatchScreen() {
                 {myReps}
               </Animated.Text>
               <Text style={styles.repLabel}>REPS</Text>
-              {lastFormQuality !== null && (
-                <View style={[
-                  styles.formBadge,
-                  lastFormQuality >= 90 ? styles.formBadgeGood :
-                  lastFormQuality >= 75 ? styles.formBadgeOk :
-                  styles.formBadgeBad,
-                ]}>
-                  <Text style={styles.formBadgeText}>
-                    FORM {lastFormQuality}%
-                    {lastFormQuality < 75 ? ' — ' + (lastFormIssues[0] ?? 'Check form') : ''}
-                  </Text>
-                </View>
-              )}
             </View>
+
+            {/* Phase 4: FormFeedback component for real-time quality display */}
+            <FormFeedback
+              formQuality={lastFormQuality}
+              formIssues={lastFormIssues}
+              velocityWarning={velocityWarning}
+              enabled={poseReady && !detectionError}
+            />
 
             {detectionError && (
               <View style={styles.errorBanner}>

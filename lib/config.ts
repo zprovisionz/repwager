@@ -51,6 +51,26 @@ export const SYMMETRY_TOLERANCE = 20; // Max angle difference between left/right
 export const FORM_QUALITY_MIN_THRESHOLD = 75; // Minimum form quality percentage (0-100) to count rep
 export const POSE_CONFIDENCE_MIN = 0.6; // Minimum keypoint confidence (0-1, increased from 0.3)
 
+// ─── PHASE 3: TEMPORAL SMOOTHING & ACCURACY IMPROVEMENTS ────────────────────
+// Kalman filter parameters for angle smoothing
+export const KALMAN_Q = 0.01; // Process noise (how much we trust the model) - lower = trust more
+export const KALMAN_R = 0.1; // Measurement noise (how much we trust sensors) - lower = trust more
+
+// Temporal smoothing - use moving average of last N frames
+export const ANGLE_SMOOTHING_FRAMES = 5; // Number of frames to average for angle calculation
+export const ANGLE_VARIANCE_THRESHOLD = 10; // Max allowed variance in angles before resetting smoothing
+
+// Multi-rep validation - require high quality reps
+export const MULTI_REP_VALIDATION_WINDOW = 3; // Track last 3 reps
+export const MULTI_REP_QUALITY_THRESHOLD = 0.8; // 80% - minimum average quality of last reps
+
+// Velocity detection - prevent bouncing/momentum cheating
+export const REP_VELOCITY_MIN_SECONDS = 0.5; // Minimum time for valid rep (prevents bouncing)
+export const REP_VELOCITY_MAX_SECONDS = 2.0; // Maximum time for valid rep (prevents stalling)
+
+// Recovery window - must return to full lockout before next rep
+export const RECOVERY_WINDOW_FRAMES = 10; // Frames to check for full recovery after rep
+
 export const EXERCISE_LABELS: Record<string, string> = {
   push_ups: 'Push-Ups',
   squats: 'Squats',
