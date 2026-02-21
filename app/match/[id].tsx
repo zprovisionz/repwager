@@ -47,11 +47,45 @@ export default function MatchScreen() {
     ]).start();
   }, [updateMyReps, repAnim]);
 
-  const { repCount, isReady: poseReady, processFrame, manualIncrement, reset: resetPose } = usePoseDetection({
+  const {
+    repCount,
+    isReady: poseReady,
+    processFrame,
+    processFrameFromImage,
+    manualIncrement,
+    reset: resetPose,
+    detectionError,
+  } = usePoseDetection({
     exerciseType: match?.exercise_type ?? 'push_ups',
     onRepCounted: handleRepCounted,
     enabled: phase === 'recording',
   });
+
+  // Handle camera frame for pose detection
+  const handleCameraFrame = useCallback(
+    (frame: any) => {
+      if (phase !== 'recording' || !poseReady) {
+        return;
+      }
+
+      try {
+        // On native, frame has data that we need to convert
+        // On web, we might have canvas data
+        if (Platform.OS === 'web') {
+          // Web: convert canvas to image source
+          // This is handled by processFrameFromImage when given canvas
+          return;
+        }
+
+        // Native: process frame data
+        // The frame object has pixel data we can use
+        processFrameFromImage(frame);
+      } catch (error) {
+        console.error('[MatchScreen] Camera frame processing error:', error);
+      }
+    },
+    [phase, poseReady, processFrameFromImage]
+  );
 
   // Determine current phase based on match state
   const determinePhase = (m: Match): MatchPhase => {
@@ -284,6 +318,19 @@ export default function MatchScreen() {
               </Animated.Text>
               <Text style={styles.repLabel}>REPS</Text>
             </View>
+
+            {detectionError && (
+              <View style={styles.errorBanner}>
+                <Text style={styles.errorText}>⚠️ {detectionError}</Text>
+                <Text style={styles.errorSubtext}>Using manual counting as fallback</Text>
+              </View>
+            )}
+
+            {!detectionError && !poseReady && (
+              <View style={styles.loadingBanner}>
+                <Text style={styles.loadingText}>Initializing pose detection...</Text>
+              </View>
+            )}
           </>
         )}
 
@@ -764,5 +811,36 @@ const styles = StyleSheet.create({
     fontFamily: typography.fontBodyBold,
     fontSize: 15,
     color: colors.textInverse,
+  },
+  errorBanner: {
+    position: 'absolute',
+    bottom: 100,
+    left: spacing.lg,
+    right: spacing.lg,
+    backgroundColor: 'rgba(255, 59, 48, 0.9)',
+    borderRadius: radius.md,
+    padding: spacing.md,
+    alignItems: 'center',
+  },
+  errorText: {
+    fontFamily: typography.fontBodyBold,
+    fontSize: 14,
+    color: '#fff',
+  },
+  errorSubtext: {
+    fontFamily: typography.fontBody,
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.8)',
+    marginTop: spacing.xs,
+  },
+  loadingBanner: {
+    position: 'absolute',
+    bottom: 100,
+    left: spacing.lg,
+    right: spacing.lg,
+    backgroundColor: 'rgba(0, 212, 255, 0.9)',
+    borderRadius: radius.md,
+    padding: spacing.md,
+    alignItems: 'center',
   },
 });

@@ -1,0 +1,204 @@
+/**
+ * Pose Detection Service
+ * Uses TensorFlow.js Pose Detection (compatible with Expo)
+ * Detects 17 keypoints representing major body joints
+ */
+
+import * as tf from '@tensorflow/tfjs';
+import * as poseDetection from '@tensorflow-models/pose-detection';
+
+// Type definitions for pose detection (must match poseDetection.service)
+export interface Keypoint {
+  name: string;
+  x: number;
+  y: number;
+  score?: number;
+}
+
+export interface Pose {
+  keypoints: Keypoint[];
+}
+
+// Type aliases for compatibility
+type PoseDetectionPose = any; // Will be properly typed once dependencies are installed
+type PoseDetector = any;
+
+let detector: PoseDetector | null = null;
+let isInitializing = false;
+let initPromise: Promise<void> | null = null;
+
+/**
+ * Initialize the pose detector model
+ * Uses COCO-SSD for mobile and web compatibility
+ */
+export async function initializePoseDetector(): Promise<void> {
+  // Return cached promise if already initializing
+  if (isInitializing && initPromise) {
+    return initPromise;
+  }
+
+  if (detector) {
+    return; // Already initialized
+  }
+
+  isInitializing = true;
+
+  initPromise = (async () => {
+    try {
+      console.log('[PoseDetection] Initializing pose detector...');
+
+      // Ensure TensorFlow is ready
+      await tf.ready();
+
+      // Create detector using MoveNet (fast, accurate, mobile-friendly)
+      detector = await poseDetection.createDetector(
+        poseDetection.SupportedModels.MoveNet,
+        {
+          modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
+        }
+      );
+
+      console.log('[PoseDetection] Pose detector initialized successfully');
+      isInitializing = false;
+    } catch (error) {
+      console.error('[PoseDetection] Failed to initialize detector:', error);
+      isInitializing = false;
+      throw error;
+    }
+  })();
+
+  return initPromise;
+}
+
+/**
+ * Detect poses from an image/canvas element
+ * @param image - Image data (HTMLCanvasElement on web, or raw image data on native)
+ * @returns Poses with keypoints and confidence scores
+ */
+export async function detectPose(image: any): Promise<Pose[]> {
+  if (!detector) {
+    throw new Error('Pose detector not initialized. Call initializePoseDetector() first.');
+  }
+
+  try {
+    const poses = await detector.estimatePoses(image, {
+      maxPoses: 1, // Single person detection
+      flipHorizontal: false,
+    });
+
+    return poses;
+  } catch (error) {
+    console.error('[PoseDetection] Error detecting pose:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get a specific keypoint from a pose by name
+ * @param pose - Pose object with keypoints
+ * @param keypointName - Name of the keypoint (e.g., 'left_shoulder', 'right_elbow')
+ * @returns Keypoint with x, y, score or null if not found
+ */
+export function getKeypoint(pose: Pose, keypointName: string): Keypoint | null {
+  if (!pose.keypoints) return null;
+
+  const keypoint = pose.keypoints.find((kp) => kp.name === keypointName);
+  return keypoint || null;
+}
+
+/**
+ * Filter keypoints by confidence threshold
+ * @param pose - Pose object
+ * @param threshold - Minimum confidence score (0-1)
+ * @returns Pose with filtered keypoints
+ */
+export function filterByConfidence(pose: Pose, threshold: number): Pose {
+  if (!pose.keypoints) return pose;
+
+  return {
+    ...pose,
+    keypoints: pose.keypoints.filter((kp: Keypoint) => (kp.score || 0) >= threshold),
+  };
+}
+
+/**
+ * Calculate the distance between two keypoints
+ * @param kp1 - First keypoint
+ * @param kp2 - Second keypoint
+ * @returns Distance in pixels
+ */
+export function getDistance(kp1: Keypoint, kp2: Keypoint): number {
+  const dx = kp1.x - kp2.x;
+  const dy = kp1.y - kp2.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+/**
+ * Calculate the angle at a joint given three keypoints
+ * Angle is calculated at the middle point (vertex)
+ * @param start - Starting point (e.g., shoulder)
+ * @param vertex - Middle point (e.g., elbow)
+ * @param end - Ending point (e.g., wrist)
+ * @returns Angle in degrees (0-180)
+ */
+export function getJointAngle(start: Keypoint, vertex: Keypoint, end: Keypoint): number {
+  // Vectors from vertex to start and vertex to end
+  const vector1 = { x: start.x - vertex.x, y: start.y - vertex.y };
+  const vector2 = { x: end.x - vertex.x, y: end.y - vertex.y };
+
+  // Dot product and magnitudes
+  const dotProduct = vector1.x * vector2.x + vector1.y * vector2.y;
+  const magnitude1 = Math.sqrt(vector1.x ** 2 + vector1.y ** 2);
+  const magnitude2 = Math.sqrt(vector2.x ** 2 + vector2.y ** 2);
+
+  // Avoid division by zero
+  if (magnitude1 === 0 || magnitude2 === 0) {
+    return 0;
+  }
+
+  // Calculate cosine of angle
+  const cosAngle = dotProduct / (magnitude1 * magnitude2);
+  // Clamp to avoid numerical errors
+  const clampedCosAngle = Math.max(-1, Math.min(1, cosAngle));
+
+  // Convert to degrees
+  const angleRadians = Math.acos(clampedCosAngle);
+  const angleDegrees = (angleRadians * 180) / Math.PI;
+
+  return angleDegrees;
+}
+
+/**
+ * Get average confidence for a set of keypoints
+ * @param keypoints - Array of keypoints
+ * @returns Average confidence score (0-1)
+ */
+export function getAverageConfidence(keypoints: Keypoint[]): number {
+  if (keypoints.length === 0) return 0;
+
+  const totalScore = keypoints.reduce((sum: number, kp: Keypoint) => sum + (kp.score || 0), 0);
+  return totalScore / keypoints.length;
+}
+
+/**
+ * Check if a keypoint has sufficient confidence
+ * @param keypoint - Keypoint to check
+ * @param threshold - Minimum confidence threshold (0-1)
+ * @returns True if confidence >= threshold
+ */
+export function isConfident(keypoint: Keypoint | undefined, threshold: number): boolean {
+  if (!keypoint) return false;
+  return (keypoint.score || 0) >= threshold;
+}
+
+/**
+ * Clean up and dispose of resources
+ */
+export async function disposePoseDetector(): Promise<void> {
+  if (detector) {
+    await detector.dispose();
+    detector = null;
+  }
+  isInitializing = false;
+  initPromise = null;
+}
