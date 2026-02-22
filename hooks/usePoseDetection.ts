@@ -200,24 +200,35 @@ export function usePoseDetection({ exerciseType, onRepCounted, enabled }: UsePos
       }
 
       if (repCounted) {
+        // Always update UI feedback regardless of whether the rep counts
         if (formQuality !== undefined) {
           setLastFormQuality(formQuality);
           setLastFormIssues(formIssues ?? []);
-
-          // Phase 3: Check velocity and multi-rep quality
-          const velocityWarning = checkRepVelocity();
-          setVelocityWarning(velocityWarning);
-
-          // Phase 3: Validate multi-rep quality
-          const multiRepValid = isMultiRepQualityValid(formQuality);
-
-          if (!multiRepValid && DEV_MODE_ENABLED) {
-            console.log('[usePoseDetection] Multi-rep validation rejected rep due to low avg quality');
-          }
         }
 
-        const allowed = throttle.current.canCount();
-        if (allowed) {
+        const velocityWarning = checkRepVelocity();
+        setVelocityWarning(velocityWarning);
+
+        // Gate 1: debounce throttle (prevents double-trigger within 500ms)
+        const throttleAllowed = throttle.current.canCount();
+
+        // Gate 2: form quality must meet minimum threshold (75%)
+        // isQualityAcceptable was defined but never called — fixed here
+        const qualityAllowed =
+          formQuality === undefined || throttle.current.isQualityAcceptable(formQuality);
+
+        // Gate 3: rolling avg quality of last 3 reps must stay above 80%
+        // Previously computed but result was only logged, never used — fixed here
+        const multiRepValid =
+          formQuality === undefined || isMultiRepQualityValid(formQuality);
+
+        if (!throttleAllowed) {
+          if (DEV_MODE_ENABLED) console.log('[usePoseDetection] Rep blocked by throttle');
+        } else if (!qualityAllowed) {
+          if (DEV_MODE_ENABLED) console.log('[usePoseDetection] Rep blocked: form quality', formQuality, '< threshold');
+        } else if (!multiRepValid) {
+          if (DEV_MODE_ENABLED) console.log('[usePoseDetection] Rep blocked: rolling avg quality too low');
+        } else {
           repCountRef.current += 1;
           setRepCount(repCountRef.current);
           onRepCounted(repCountRef.current);
