@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { notifyBadgeUnlocked } from '@/services/notification.service';
 import type { Badge, UserBadge } from '@/types/database';
 import type { Profile } from '@/types/database';
 
@@ -30,7 +31,11 @@ export async function checkAndAwardBadges(userId: string, profile: Profile, matc
     if (!data) {
       const { error } = await (supabase.from('user_badges') as any)
         .insert({ user_id: userId, badge_id: badgeId });
-      if (!error) awarded.push(badgeId);
+      if (!error) {
+        awarded.push(badgeId);
+        // Send notification for new badge
+        await sendBadgeNotification(userId, badgeId);
+      }
     }
   };
 
@@ -46,4 +51,27 @@ export async function checkAndAwardBadges(userId: string, profile: Profile, matc
   }
 
   return awarded;
+}
+
+/**
+ * Send notification when a badge is unlocked
+ */
+async function sendBadgeNotification(userId: string, badgeId: string): Promise<void> {
+  try {
+    const { data: badge } = await (supabase.from('badges') as any)
+      .select('name, icon, xp_reward')
+      .eq('id', badgeId)
+      .maybeSingle();
+
+    if (badge) {
+      await notifyBadgeUnlocked(
+        userId,
+        badge.name,
+        badge.icon || '🏅',
+        badge.xp_reward || 0
+      );
+    }
+  } catch (err) {
+    console.warn('[badge.service] Failed to send badge notification:', err);
+  }
 }

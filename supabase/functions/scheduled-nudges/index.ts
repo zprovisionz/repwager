@@ -6,12 +6,53 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
 };
 
-async function sendPush(supabaseUrl: string, userId: string, title: string, body: string, data: Record<string, unknown> = {}) {
-  await fetch(`${supabaseUrl}/functions/v1/send-push-notification`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${Deno.env.get('SUPABASE_ANON_KEY')}` },
-    body: JSON.stringify({ user_id: userId, title, body, data }),
-  });
+interface NotificationPayload {
+  user_id: string;
+  type: string;
+  title: string;
+  body: string;
+  data?: Record<string, unknown>;
+}
+
+/**
+ * Send notification to database and push via send-push-notification function
+ */
+async function sendNotification(
+  supabase: any,
+  supabaseUrl: string,
+  userId: string,
+  type: string,
+  title: string,
+  body: string,
+  data: Record<string, unknown> = {}
+) {
+  try {
+    // Save to notifications table
+    await supabase.from('notifications').insert({
+      user_id: userId,
+      type,
+      title,
+      body,
+      data,
+    });
+
+    // Send push notification
+    await fetch(`${supabaseUrl}/functions/v1/send-push-notification`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${Deno.env.get('SUPABASE_ANON_KEY')}`,
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        title,
+        body,
+        data: { type, ...data },
+      }),
+    });
+  } catch (err) {
+    console.error(`Failed to send notification to ${userId}:`, err);
+  }
 }
 
 Deno.serve(async (req: Request) => {
@@ -28,7 +69,8 @@ Deno.serve(async (req: Request) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const now = new Date();
 
-    // Inactivity nudge: users inactive 3–7 days with no push in last 24h
+    // ─── INACTIVITY NUDGE ──────────────────────────────────────────────────
+    // Target: Users inactive 3–7 days
     const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString();
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -42,10 +84,20 @@ Deno.serve(async (req: Request) => {
       const streakMsg = user.current_streak > 0
         ? `Your ${user.current_streak}-day streak is at risk!`
         : 'New challenges are waiting for you.';
-      await sendPush(supabaseUrl, user.id, 'Miss the grind?', streakMsg, { type: 'inactivity_nudge' });
+
+      await sendNotification(
+        supabase,
+        supabaseUrl,
+        user.id,
+        'inactivity_nudge',
+        '👋 Miss the grind?',
+        streakMsg,
+        { streak: user.current_streak, action: 'play_match' }
+      );
     }
 
-    // Daily streak reminder: users active yesterday who haven't played today
+    // ─── DAILY STREAK REMINDER ────────────────────────────────────────────
+    // Target: Users with active streaks who haven't played today
     const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     const today = now.toISOString().split('T')[0];
 
@@ -56,20 +108,30 @@ Deno.serve(async (req: Request) => {
       .lt('last_active_date', `${today}T00:00:00Z`);
 
     for (const user of streakUsers ?? []) {
-      await sendPush(
+      await sendNotification(
+        supabase,
         supabaseUrl,
         user.id,
-        `Keep your ${user.current_streak}-day streak alive!`,
-        'Challenge someone today to maintain your streak.',
-        { type: 'streak_reminder' }
+        'streak_reminder',
+        `🔥 Streak reminder!`,
+        `Keep your ${user.current_streak}-day streak alive. Challenge someone today!`,
+        { streak: user.current_streak, action: 'play_match' }
       );
     }
 
     return new Response(
-      JSON.stringify({ inactivity: inactiveUsers?.length ?? 0, streaks: streakUsers?.length ?? 0 }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      JSON.stringify({
+        inactivity: inactiveUsers?.length ?? 0,
+        streaks: streakUsers?.length ?? 0,
+        timestamp: now.toISOString(),
+      }),
+      {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      }
     );
   } catch (err) {
+    console.error('scheduled-nudges error:', err);
     return new Response(JSON.stringify({ error: (err as Error).message }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

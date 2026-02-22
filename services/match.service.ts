@@ -1,4 +1,6 @@
 import { supabase } from '@/lib/supabase';
+import { notifyOpponentSubmitted, notifyNewChallenge } from '@/services/notification.service';
+import { getTimeUntilDeadline, formatDeadlineTime } from '@/services/asyncMatch.service';
 import type { Match } from '@/types/database';
 
 export async function createMatch(challengerId: string, exerciseType: 'push_ups' | 'squats', wagerAmount: number, opponentId?: string, mode: 'competitive' | 'casual' = 'competitive'): Promise<Match> {
@@ -15,6 +17,29 @@ export async function createMatch(challengerId: string, exerciseType: 'push_ups'
     .maybeSingle();
   if (error) throw error;
   if (!data) throw new Error('Match not created');
+
+  // Send notification to opponent if specific opponent (not open challenge)
+  if (opponentId) {
+    try {
+      const { data: challenger } = await (supabase.from('profiles') as any)
+        .select('display_name')
+        .eq('id', challengerId)
+        .maybeSingle();
+
+      if (challenger) {
+        await notifyNewChallenge(
+          opponentId,
+          challenger.display_name || 'Unknown Player',
+          exerciseType,
+          wagerAmount,
+          data.id
+        );
+      }
+    } catch (notifErr) {
+      console.warn('[match.service] Failed to send challenge notification:', notifErr);
+    }
+  }
+
   return data as Match;
 }
 
@@ -98,6 +123,38 @@ export async function submitMatchScore(matchId: string, userId: string, reps: nu
     p_reps: reps,
   });
   if (error) throw error;
+
+  // Send notification to opponent when this user submits
+  if (data) {
+    try {
+      const match = data as Match;
+      const isChallenger = match.challenger_id === userId;
+      const opponentId = isChallenger ? match.opponent_id : match.challenger_id;
+
+      if (opponentId && !match.opponent_submitted_at && !match.challenger_submitted_at) {
+        // Only send notification if opponent hasn't already submitted
+        const { data: submitter } = await (supabase.from('profiles') as any)
+          .select('display_name')
+          .eq('id', userId)
+          .maybeSingle();
+
+        if (submitter && match.submission_deadline) {
+          const timeLeft = getTimeUntilDeadline(match);
+          const minutesRemaining = Math.ceil(timeLeft / 60);
+
+          await notifyOpponentSubmitted(
+            matchId,
+            opponentId,
+            submitter.display_name || 'Your opponent',
+            minutesRemaining
+          );
+        }
+      }
+    } catch (notifErr) {
+      console.warn('[match.service] Failed to send opponent notification:', notifErr);
+    }
+  }
+
   return data as Match;
 }
 

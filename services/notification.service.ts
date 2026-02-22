@@ -1,6 +1,8 @@
 import { supabase } from '@/lib/supabase';
 import type { Notification } from '@/types/database';
 
+// ─── CORE NOTIFICATION OPERATIONS ──────────────────────────────────────────
+
 export async function getNotifications(userId: string): Promise<Notification[]> {
   const { data, error } = await (supabase.from('notifications') as any)
     .select('*')
@@ -38,4 +40,143 @@ export function subscribeToNotifications(userId: string, callback: (notification
       callback(payload.new as Notification);
     })
     .subscribe();
+}
+
+// ─── PUSH NOTIFICATION HELPER ──────────────────────────────────────────────
+
+/**
+ * Send both database notification and push notification to user
+ */
+async function sendNotificationToPush(
+  userId: string,
+  type: 'match_challenge' | 'match_accepted' | 'match_completed' | 'badge_earned' | 'dispute_filed' | 'dispute_resolved' | 'opponent_submitted' | 'new_challenge' | 'inactivity_nudge' | 'streak_reminder',
+  title: string,
+  body: string,
+  data: Record<string, unknown> = {}
+) {
+  try {
+    // Save to notifications table
+    const { error: dbError } = await (supabase.from('notifications') as any).insert({
+      user_id: userId,
+      type,
+      title,
+      body,
+      data,
+    });
+
+    if (dbError) console.error('[notification.service] DB insert error:', dbError);
+
+    // Send push notification via Supabase function
+    try {
+      await fetch(`${supabase.supabaseUrl}/functions/v1/send-push-notification`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${supabase.auth.session()?.access_token || ''}`,
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          title,
+          body,
+          data: { type, ...data },
+        }),
+      });
+    } catch (pushErr) {
+      console.warn('[notification.service] Push send failed (non-blocking):', pushErr);
+    }
+  } catch (err) {
+    console.error('[notification.service] Error sending notification:', err);
+  }
+}
+
+// ─── PHASE 2: NOTIFICATION TRIGGERS ───────────────────────────────────────
+
+/**
+ * Notify opponent that their opponent has submitted a score
+ * Used when one player submits in an async match
+ */
+export async function notifyOpponentSubmitted(
+  matchId: string,
+  opponentUserId: string,
+  opponentName: string,
+  minutesRemaining: number
+): Promise<void> {
+  const title = `🎯 ${opponentName} submitted!`;
+  const body = `You have ${minutesRemaining} minutes left to submit your score.`;
+  await sendNotificationToPush(opponentUserId, 'opponent_submitted', title, body, {
+    matchId,
+    action: 'view_match',
+  });
+}
+
+/**
+ * Notify user when a new challenge is created for them
+ */
+export async function notifyNewChallenge(
+  userId: string,
+  challengerName: string,
+  exerciseType: 'push_ups' | 'squats',
+  wagerAmount: number,
+  matchId: string
+): Promise<void> {
+  const exercise = exerciseType === 'push_ups' ? 'Push-Ups' : 'Squats';
+  const title = `⚡ ${challengerName} challenges you!`;
+  const body = `${exercise} match with $${wagerAmount.toFixed(2)} wager. Accept or pass?`;
+  await sendNotificationToPush(userId, 'new_challenge', title, body, {
+    matchId,
+    action: 'view_challenge',
+    challenger: challengerName,
+    exercise: exerciseType,
+  });
+}
+
+/**
+ * Notify user when they unlock a badge
+ */
+export async function notifyBadgeUnlocked(
+  userId: string,
+  badgeName: string,
+  badgeIcon: string,
+  xpReward: number
+): Promise<void> {
+  const title = `🏅 Badge Unlocked: ${badgeName}`;
+  const body = `You earned +${xpReward} XP! Keep it up!`;
+  await sendNotificationToPush(userId, 'badge_earned', title, body, {
+    badge: badgeName,
+    icon: badgeIcon,
+    xp: xpReward,
+  });
+}
+
+/**
+ * Remind user to play today to keep their streak alive
+ */
+export async function notifyStreakReminder(
+  userId: string,
+  currentStreak: number
+): Promise<void> {
+  const title = `🔥 Streak reminder!`;
+  const body = `Keep your ${currentStreak}-day streak alive. Challenge someone today!`;
+  await sendNotificationToPush(userId, 'streak_reminder', title, body, {
+    streak: currentStreak,
+    action: 'play_match',
+  });
+}
+
+/**
+ * Nudge inactive user to return and play
+ */
+export async function notifyInactivity(
+  userId: string,
+  currentStreak: number
+): Promise<void> {
+  const streakMsg = currentStreak > 0
+    ? `Your ${currentStreak}-day streak is at risk!`
+    : 'New challenges are waiting for you.';
+  const title = `👋 Miss the grind?`;
+  const body = streakMsg;
+  await sendNotificationToPush(userId, 'inactivity_nudge', title, body, {
+    streak: currentStreak,
+    action: 'play_match',
+  });
 }
