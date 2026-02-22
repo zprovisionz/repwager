@@ -70,7 +70,8 @@ export function usePoseDetection({ exerciseType, onRepCounted, enabled }: UsePos
       })
       .catch((error) => {
         if (DEV_MODE_ENABLED) console.error('[usePoseDetection] Failed to initialize pose detector:', error);
-        setDetectionError(`Pose detection failed: ${error.message}`);
+        // Set error message but still mark as ready so app doesn't hang
+        setDetectionError(`Pose detection unavailable: ${(error as Error).message}`);
         setIsReady(true);
       });
 

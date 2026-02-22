@@ -47,6 +47,13 @@ export async function initializePoseDetector(): Promise<void> {
     try {
       console.log('[PoseDetection] Initializing pose detector...');
 
+      // Check if fetch is available (required for model loading)
+      if (typeof fetch === 'undefined') {
+        console.warn('[PoseDetection] Fetch API not available in this environment. Pose detection will not work.');
+        isInitializing = false;
+        throw new Error('Fetch API not available - pose detection cannot initialize');
+      }
+
       // Ensure TensorFlow is ready
       await tf.ready();
 
@@ -63,7 +70,7 @@ export async function initializePoseDetector(): Promise<void> {
     } catch (error) {
       console.error('[PoseDetection] Failed to initialize detector:', error);
       isInitializing = false;
-      throw error;
+      // Don't re-throw - allow app to continue without pose detection
     }
   })();
 
@@ -77,7 +84,8 @@ export async function initializePoseDetector(): Promise<void> {
  */
 export async function detectPose(image: any): Promise<Pose[]> {
   if (!detector) {
-    throw new Error('Pose detector not initialized. Call initializePoseDetector() first.');
+    console.warn('[PoseDetection] Pose detector not initialized');
+    return [];
   }
 
   try {
@@ -89,7 +97,7 @@ export async function detectPose(image: any): Promise<Pose[]> {
     return poses;
   } catch (error) {
     console.error('[PoseDetection] Error detecting pose:', error);
-    throw error;
+    return [];
   }
 }
 

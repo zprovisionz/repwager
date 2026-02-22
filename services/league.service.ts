@@ -40,73 +40,99 @@ export const SEASON = 'Season 1: Elite';
  * Get all public leagues
  */
 export async function getPublicLeagues(): Promise<League[]> {
-  const { data, error } = await (supabase.from('leagues') as any)
-    .select('*')
-    .eq('type', 'PUBLIC')
-    .order('created_at', { ascending: false });
+  try {
+    const { data, error } = await (supabase.from('leagues') as any)
+      .select('*')
+      .eq('type', 'PUBLIC')
+      .order('created_at', { ascending: false });
 
-  if (error) {
-    console.error('[league.service] getPublicLeagues error:', error);
+    if (error) {
+      console.warn('[league.service] getPublicLeagues error (tables may not be set up yet):', error.message);
+      return [];
+    }
+
+    return (data ?? []) as League[];
+  } catch (error) {
+    console.warn('[league.service] getPublicLeagues exception:', error);
     return [];
   }
-
-  return (data ?? []) as League[];
 }
 
 /**
  * Get league members ranked by points
  */
 export async function getLeagueMembers(leagueId: string, limit = 50): Promise<LeagueMemb[]> {
-  const { data, error } = await (supabase.from('league_members') as any)
-    .select('*, profile:user_id(id, display_name, avatar_gender, avatar_head, avatar_torso, avatar_legs, current_level)')
-    .eq('league_id', leagueId)
-    .order('points', { ascending: false })
-    .order('rank', { ascending: true })
-    .limit(limit);
+  try {
+    const { data, error } = await (supabase.from('league_members') as any)
+      .select('*, profile:user_id(id, display_name, avatar_gender, avatar_head, avatar_torso, avatar_legs, current_level)')
+      .eq('league_id', leagueId)
+      .order('points', { ascending: false })
+      .order('rank', { ascending: true })
+      .limit(limit);
 
-  if (error) {
-    console.error('[league.service] getLeagueMembers error:', error);
+    if (error) {
+      console.warn('[league.service] getLeagueMembers error (tables may not be set up yet):', error.message);
+      return [];
+    }
+
+    return (data ?? []) as LeagueMemb[];
+  } catch (error) {
+    console.warn('[league.service] getLeagueMembers exception:', error);
     return [];
   }
-
-  return (data ?? []) as LeagueMemb[];
 }
 
 /**
  * Get user's rank in a specific league
  */
 export async function getUserLeagueRank(userId: string, leagueId: string): Promise<{ rank: number; points: number } | null> {
-  const { data, error } = await (supabase.from('league_members') as any)
-    .select('rank, points')
-    .eq('league_id', leagueId)
-    .eq('user_id', userId)
-    .maybeSingle();
+  try {
+    const { data, error } = await (supabase.from('league_members') as any)
+      .select('rank, points')
+      .eq('league_id', leagueId)
+      .eq('user_id', userId)
+      .maybeSingle();
 
-  if (error || !data) {
+    if (error || !data) {
+      return null;
+    }
+
+    return data;
+  } catch (err) {
+    console.warn('[league.service] getUserLeagueRank error:', err);
     return null;
   }
-
-  return data;
 }
 
 /**
  * Join user to a public league
  */
-export async function joinLeague(userId: string, leagueId: string): Promise<LeagueMemb> {
-  const { data, error } = await (supabase.from('league_members') as any)
-    .insert({
-      league_id: leagueId,
-      user_id: userId,
-      points: 0,
-      rank: 1000, // Will be recalculated
-    })
-    .select()
-    .maybeSingle();
+export async function joinLeague(userId: string, leagueId: string): Promise<LeagueMemb | null> {
+  try {
+    const { data, error } = await (supabase.from('league_members') as any)
+      .insert({
+        league_id: leagueId,
+        user_id: userId,
+        points: 0,
+        rank: 1000, // Will be recalculated
+      })
+      .select()
+      .maybeSingle();
 
-  if (error) throw error;
-  if (!data) throw new Error('Failed to join league');
+    if (error) {
+      console.warn('[league.service] joinLeague error:', error);
+      return null;
+    }
+    if (!data) {
+      console.warn('[league.service] joinLeague: Failed to join league');
+      return null;
+    }
 
-  return data as LeagueMemb;
+    return data as LeagueMemb;
+  } catch (err) {
+    console.warn('[league.service] joinLeague exception:', err);
+    return null;
+  }
 }
 
 /**
@@ -180,18 +206,23 @@ export async function recalculateLeagueRanks(leagueId: string): Promise<void> {
  * Get top 3 members (reward eligible)
  */
 export async function getLeagueTop3(leagueId: string): Promise<LeagueMemb[]> {
-  const { data, error } = await (supabase.from('league_members') as any)
-    .select('*, profile:user_id(id, display_name, avatar_gender)')
-    .eq('league_id', leagueId)
-    .order('points', { ascending: false })
-    .limit(3);
+  try {
+    const { data, error } = await (supabase.from('league_members') as any)
+      .select('*, profile:user_id(id, display_name, avatar_gender)')
+      .eq('league_id', leagueId)
+      .order('points', { ascending: false })
+      .limit(3);
 
-  if (error) {
-    console.error('[league.service] getLeagueTop3 error:', error);
+    if (error) {
+      console.warn('[league.service] getLeagueTop3 error:', error);
+      return [];
+    }
+
+    return (data ?? []) as LeagueMemb[];
+  } catch (err) {
+    console.warn('[league.service] getLeagueTop3 exception:', err);
     return [];
   }
-
-  return (data ?? []) as LeagueMemb[];
 }
 
 /**
@@ -251,32 +282,48 @@ export function subscribeToLeagueMembers(leagueId: string, callback: (members: L
 /**
  * Get or create the default public league for this season
  */
-export async function getOrCreateDefaultLeague(): Promise<League> {
-  // Check if exists
-  const { data: existing } = await (supabase.from('leagues') as any)
-    .select('*')
-    .eq('season', SEASON)
-    .eq('type', 'PUBLIC')
-    .maybeSingle();
+export async function getOrCreateDefaultLeague(): Promise<League | null> {
+  try {
+    // Check if exists
+    const { data: existing, error: fetchErr } = await (supabase.from('leagues') as any)
+      .select('*')
+      .eq('season', SEASON)
+      .eq('type', 'PUBLIC')
+      .maybeSingle();
 
-  if (existing) {
-    return existing as League;
+    if (fetchErr && fetchErr.code !== 'PGRST205') {
+      // Only ignore table-not-found error
+      throw fetchErr;
+    }
+
+    if (existing) {
+      return existing as League;
+    }
+
+    // Create new
+    const { data: created, error } = await (supabase.from('leagues') as any)
+      .insert({
+        name: SEASON,
+        type: 'PUBLIC',
+        season: SEASON,
+      })
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      console.warn('[league.service] Failed to create league:', error);
+      return null;
+    }
+    if (!created) {
+      console.warn('[league.service] Failed to create league: no data returned');
+      return null;
+    }
+
+    return created as League;
+  } catch (err) {
+    console.warn('[league.service] getOrCreateDefaultLeague error:', err);
+    return null;
   }
-
-  // Create new
-  const { data: created, error } = await (supabase.from('leagues') as any)
-    .insert({
-      name: SEASON,
-      type: 'PUBLIC',
-      season: SEASON,
-    })
-    .select()
-    .maybeSingle();
-
-  if (error) throw error;
-  if (!created) throw new Error('Failed to create league');
-
-  return created as League;
 }
 
 /**
@@ -285,6 +332,10 @@ export async function getOrCreateDefaultLeague(): Promise<League> {
 export async function autoEnrollUserInDefaultLeague(userId: string): Promise<void> {
   try {
     const league = await getOrCreateDefaultLeague();
+    if (!league) {
+      console.warn('[league.service] autoEnrollUserInDefaultLeague: Could not get or create league');
+      return;
+    }
 
     // Check if already member
     const { data: existing } = await (supabase.from('league_members') as any)
