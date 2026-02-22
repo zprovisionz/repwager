@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useMatchStore } from '@/stores/matchStore';
 import { useToastStore } from '@/stores/toastStore';
 import { getMatch, submitMatchScore, subscribeToMatch, isMatchExpired } from '@/services/match.service';
+import { hasOpponentSubmitted, hasUserSubmitted, isOpponentScoreHidden, formatDeadlineTime, getTimeUntilDeadline } from '@/services/asyncMatch.service';
 import { usePoseDetection } from '@/hooks/usePoseDetection';
 import { useMatchTimer } from '@/hooks/useMatchTimer';
 import { FormFeedback } from '@/components/FormFeedback'; // Phase 4
@@ -231,16 +232,8 @@ export default function MatchScreen() {
     return `${m}:${sec.toString().padStart(2, '0')}`;
   };
 
-  // Format deadline countdown
-  const formatDeadline = (seconds: number) => {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    if (hours > 0) {
-      return `${hours}h ${minutes}m`;
-    }
-    return `${minutes}m ${secs}s`;
-  };
+  // Format deadline countdown (delegate to asyncMatch service)
+  const formatDeadline = (seconds: number) => formatDeadlineTime(seconds);
 
   // Camera permission check
   if (!permission) return <View style={styles.fill} />;
@@ -347,7 +340,7 @@ export default function MatchScreen() {
         )}
 
         {/* SUBMITTED PHASE: Show your reps + waiting for opponent + deadline */}
-        {phase === 'submitted' && (
+        {phase === 'submitted' && match && (
           <View style={styles.centerContent}>
             <View style={styles.submitCard}>
               <View style={styles.submittedBadge}>
@@ -360,16 +353,30 @@ export default function MatchScreen() {
                 <Text style={styles.scoreBig}>{myReps}</Text>
               </View>
 
-              <View style={styles.waitingBox}>
-                <Text style={styles.waitingText}>Waiting for opponent...</Text>
+              {hasOpponentSubmitted(match, session?.user?.id ?? '') ? (
+                <View style={styles.opponentSubmittedBox}>
+                  <Check size={16} color={colors.success} />
+                  <Text style={styles.opponentSubmittedText}>🎯 Opponent submitted! You can now view their reps.</Text>
+                </View>
+              ) : (
+                <View style={styles.waitingBox}>
+                  <Text style={styles.waitingText}>Waiting for opponent...</Text>
+                </View>
+              )}
+
+              <View style={[styles.deadlineBox, secondsUntilDeadline < 900 ? styles.deadlineBoxUrgent : null]}>
+                <Clock size={14} color={secondsUntilDeadline < 900 ? colors.error : colors.accent} />
+                <Text style={[styles.deadlineText, secondsUntilDeadline < 900 ? styles.deadlineTextUrgent : null]}>
+                  {hasOpponentSubmitted(match, session?.user?.id ?? '')
+                    ? `Match completes in ${formatDeadline(secondsUntilDeadline)}`
+                    : `Opponent has ${formatDeadline(secondsUntilDeadline)} to submit`
+                  }
+                </Text>
               </View>
 
-              <View style={styles.deadlineBox}>
-                <Clock size={14} color={colors.accent} />
-                <Text style={styles.deadlineText}>Opponent has {formatDeadline(secondsUntilDeadline)} to submit</Text>
-              </View>
-
-              <Text style={styles.hiddenOpponentText}>Opponent's score is hidden until they submit</Text>
+              {!hasOpponentSubmitted(match, session?.user?.id ?? '') && (
+                <Text style={styles.hiddenOpponentText}>Opponent's score is hidden until they submit</Text>
+              )}
             </View>
           </View>
         )}
@@ -695,6 +702,27 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     textAlign: 'center',
     fontStyle: 'italic',
+  },
+  opponentSubmittedBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: 'rgba(34,197,94,0.1)',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+  },
+  opponentSubmittedText: {
+    fontFamily: typography.fontBodyMedium,
+    fontSize: 14,
+    color: colors.success,
+    flex: 1,
+  },
+  deadlineBoxUrgent: {
+    backgroundColor: 'rgba(255,59,48,0.1)',
+  },
+  deadlineTextUrgent: {
+    color: colors.error,
   },
 
   // EXPIRED PHASE

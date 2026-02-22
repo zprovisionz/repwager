@@ -6,12 +6,13 @@ import { colors, typography, spacing, radius } from '@/lib/theme';
 import { useAuthStore } from '@/stores/authStore';
 import { useMatchStore } from '@/stores/matchStore';
 import { useToastStore } from '@/stores/toastStore';
-import { Trophy, Frown, Zap, AlertTriangle, Play } from 'lucide-react-native';
+import { Trophy, Frown, Zap, AlertTriangle, Play, Clock } from 'lucide-react-native';
 import { theatreService } from '@/services/theatre.service';
 import Button from '@/components/ui/Button';
 import { LevelUpAnimation } from '@/components/LevelUpAnimation';
 import { checkAndAwardBadges } from '@/services/badge.service';
 import { getMatch, fileDispute } from '@/services/match.service';
+import { getOpponentData, hasUserSubmitted, hasOpponentSubmitted } from '@/services/asyncMatch.service';
 import { calculateLevel } from '@/lib/levelSystem';
 import type { Match } from '@/types/database';
 import type { Level } from '@/lib/levelSystem';
@@ -215,7 +216,23 @@ export default function ResultsScreen() {
             <Text style={styles.vsText}>vs</Text>
             <View style={styles.scoreColumn}>
               <Text style={styles.scoreColumnLabel}>Opponent Reps</Text>
-              <Text style={[styles.scoreColumnValue, !won && styles.winColor]}>{match.challenger_id === session?.user?.id ? match.opponent_reps : match.challenger_reps}</Text>
+              {(() => {
+                const opponentData = getOpponentData(match, session?.user?.id ?? '');
+                if (opponentData.reps !== null) {
+                  return <Text style={[styles.scoreColumnValue, !won && styles.winColor]}>{opponentData.reps}</Text>;
+                } else if (match.status === 'completed') {
+                  // Match is completed but opponent reps are somehow null (edge case)
+                  return <Text style={styles.scoreColumnValue}>---</Text>;
+                } else {
+                  // Match not yet completed, show pending state
+                  return (
+                    <View style={styles.pendingScoreContainer}>
+                      <Clock size={18} color={colors.textMuted} />
+                      <Text style={styles.pendingScoreText}>Pending</Text>
+                    </View>
+                  );
+                }
+              })()}
             </View>
           </View>
         )}
@@ -337,6 +354,17 @@ const styles = StyleSheet.create({
     fontFamily: typography.fontDisplay,
     fontSize: 48,
     color: colors.text,
+  },
+  pendingScoreContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.md,
+  },
+  pendingScoreText: {
+    fontFamily: typography.fontBodyMedium,
+    fontSize: 14,
+    color: colors.textMuted,
   },
   vsText: {
     fontFamily: typography.fontDisplayMedium,
