@@ -180,3 +180,77 @@ export async function notifyInactivity(
     action: 'play_match',
   });
 }
+
+// ─── PHASE 2: LEAGUE NOTIFICATIONS ────────────────────────────────────────
+
+/**
+ * Notify league members that a new match has been scheduled
+ */
+export async function notifyLeagueMatchScheduled(
+  userIds: string[],
+  leagueName: string,
+  opponentLeagueName: string,
+  matchId: string
+): Promise<void> {
+  for (const userId of userIds) {
+    try {
+      const title = `⚔️ League Match: ${leagueName} vs ${opponentLeagueName}`;
+      const body = 'Your league is facing a new opponent! Get ready to compete.';
+      await sendNotificationToPush(userId, 'match_challenge', title, body, {
+        type: 'league_match_scheduled',
+        matchId,
+        leagueName,
+        action: 'view_league_match',
+      });
+    } catch (err) {
+      console.warn('[Notification] Failed to send league match notification:', err);
+    }
+  }
+}
+
+/**
+ * Notify user when they advance in playoff bracket
+ */
+export async function notifyLeaguePlayoffAdvance(
+  userId: string,
+  leagueName: string,
+  roundName: string
+): Promise<void> {
+  try {
+    const title = `🏆 Playoffs Advancing: ${leagueName}`;
+    const body = `You advanced to the ${roundName}!`;
+    await sendNotificationToPush(userId, 'match_completed', title, body, {
+      type: 'league_playoff_advance',
+      leagueName,
+      roundName,
+      action: 'view_playoff_bracket',
+    });
+  } catch (err) {
+    console.warn('[Notification] Failed to send playoff advance notification:', err);
+  }
+}
+
+/**
+ * Notify user when they level up in a league
+ */
+export async function notifyLeagueLevelUp(
+  userId: string,
+  leagueName: string,
+  newLevel: number,
+  newTitle?: string
+): Promise<void> {
+  try {
+    const titleMsg = newTitle ? ` (${newTitle})` : '';
+    const title = `⭐ League Level Up in ${leagueName}`;
+    const body = `Congratulations! You reached Level ${newLevel}${titleMsg}.`;
+    await sendNotificationToPush(userId, 'badge_earned', title, body, {
+      type: 'league_level_up',
+      leagueName,
+      newLevel,
+      newTitle: newTitle || '',
+      action: 'view_league',
+    });
+  } catch (err) {
+    console.warn('[Notification] Failed to send level up notification:', err);
+  }
+}

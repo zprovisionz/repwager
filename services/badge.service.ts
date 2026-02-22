@@ -75,3 +75,57 @@ async function sendBadgeNotification(userId: string, badgeId: string): Promise<v
     console.warn('[badge.service] Failed to send badge notification:', err);
   }
 }
+
+// ─── PHASE 2: LEAGUE BADGES ───────────────────────────────────────────────
+
+/**
+ * Award a league-specific badge to user
+ * Tracks in both global badges and league-specific badges table
+ */
+export async function awardLeagueBadge(
+  userId: string,
+  badgeId: string,
+  leagueId?: string
+): Promise<boolean> {
+  try {
+    // Award to global profile badges (if it exists in badges table)
+    const { data: existingBadge } = await (supabase.from('user_badges') as any)
+      .select('id')
+      .eq('user_id', userId)
+      .eq('badge_id', badgeId)
+      .maybeSingle();
+
+    if (!existingBadge) {
+      const { error: globalError } = await (supabase.from('user_badges') as any)
+        .insert({ user_id: userId, badge_id: badgeId });
+
+      if (globalError) {
+        console.warn('[badge.service] Failed to award global badge:', globalError);
+      } else {
+        await sendBadgeNotification(userId, badgeId);
+      }
+    }
+
+    // Also track in league-specific badges if leagueId provided
+    if (leagueId) {
+      const { error: leagueError } = await (supabase.from('user_league_badges') as any)
+        .insert({
+          user_id: userId,
+          league_id: leagueId,
+          badge_id: badgeId,
+          awarded_at: new Date().toISOString(),
+        })
+        .on('*', () => {}) // Suppress duplicate key errors
+        .maybeSingle();
+
+      if (leagueError && !leagueError.message.includes('duplicate')) {
+        console.warn('[badge.service] Failed to award league badge:', leagueError);
+      }
+    }
+
+    return true;
+  } catch (err) {
+    console.warn('[badge.service] Failed to award league badge:', err);
+    return false;
+  }
+}

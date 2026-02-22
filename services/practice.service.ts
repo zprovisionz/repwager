@@ -28,6 +28,7 @@ export interface PracticeStats {
 /**
  * Record a new practice session
  * Also increments casual_match_count for casual mode progression
+ * And auto-enrolls user in default league (first time only)
  */
 export async function recordPracticeSession(
   userId: string,
@@ -63,6 +64,15 @@ export async function recordPracticeSession(
 
   if (updateErr) {
     console.warn('[practice.service] Failed to increment casual_match_count:', updateErr);
+  }
+
+  // Auto-enroll user in default league (first time only)
+  try {
+    const { autoEnrollUserInDefaultLeague } = await import('@/services/leagueTournament.service');
+    await autoEnrollUserInDefaultLeague(userId);
+  } catch (err) {
+    console.warn('[practice.service] Failed to enroll in league:', err);
+    // Don't fail the practice session if league enrollment fails
   }
 
   return { session, casualCountNow: currentCount, unlockedCompetitive };

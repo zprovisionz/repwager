@@ -1,7 +1,7 @@
 import { Redirect, Tabs } from 'expo-router';
 import { useAuthStore } from '@/stores/authStore';
 import { colors, typography } from '@/lib/theme';
-import { Home, Award, User, Play } from 'lucide-react-native'; // Added Play for Theatre
+import { Home, Trophy, User, Play } from 'lucide-react-native';
 import { View, StyleSheet } from 'react-native';
 
 export default function TabsLayout() {
@@ -32,7 +32,7 @@ export default function TabsLayout() {
         name="leagues"
         options={{
           title: 'Leagues',
-          tabBarIcon: ({ color, size }) => <Award size={size} color={color} />,
+          tabBarIcon: ({ color, size }) => <Trophy size={size} color={color} />,
         }}
       />
       <Tabs.Screen

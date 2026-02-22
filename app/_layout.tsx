@@ -8,6 +8,7 @@ import { Orbitron_500Medium, Orbitron_700Bold } from '@expo-google-fonts/orbitro
 import * as SplashScreen from 'expo-splash-screen';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
+import { useLeagueStore } from '@/store/leagueStore';
 import { getProfile } from '@/services/profile.service';
 import ToastContainer from '@/components/ui/ToastContainer';
 import { DevPanel } from '@/components/DevPanel';
@@ -43,6 +44,12 @@ export default function RootLayout() {
           .then((p) => setProfile(p))
           .catch(() => setProfile(null))
           .finally(() => setLoading(false));
+
+        // Initialize league store on session restore
+        const { fetchMyLeagues } = useLeagueStore.getState();
+        fetchMyLeagues(session.user.id).catch((err) =>
+          console.warn('[League] Failed to fetch leagues on session restore:', err)
+        );
       } else {
         setLoading(false);
       }
@@ -56,6 +63,12 @@ export default function RootLayout() {
             const p = await getProfile(session.user.id);
             setProfile(p);
             registerPushToken(session.user.id);
+
+            // Initialize league store when user logs in
+            const { fetchMyLeagues } = useLeagueStore.getState();
+            fetchMyLeagues(session.user.id).catch((err) =>
+              console.warn('[League] Failed to fetch leagues on login:', err)
+            );
           } catch {
             setProfile(null);
           }
