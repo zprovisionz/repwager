@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { notifyOpponentSubmitted, notifyNewChallenge } from '@/services/notification.service';
 import { getTimeUntilDeadline, formatDeadlineTime } from '@/services/asyncMatch.service';
+import { autoEnrollUserInDefaultLeague, updateLeaguePoints, getOrCreateDefaultLeague } from '@/services/league.service';
 import type { Match } from '@/types/database';
 
 export async function createMatch(challengerId: string, exerciseType: 'push_ups' | 'squats', wagerAmount: number, opponentId?: string, mode: 'competitive' | 'casual' = 'competitive'): Promise<Match> {
@@ -180,4 +181,27 @@ export function subscribeToMatch(matchId: string, callback: (match: Match) => vo
       callback(payload.new as Match);
     })
     .subscribe();
+}
+
+/**
+ * Handle post-match league updates (called after match completion)
+ * Enrolls user in default league and awards points if they won
+ */
+export async function updateMatchLeagueStats(
+  userId: string,
+  userLevel: number,
+  isWinner: boolean
+): Promise<void> {
+  try {
+    // Auto-enroll in default league
+    await autoEnrollUserInDefaultLeague(userId);
+
+    // Award points if winner
+    if (isWinner) {
+      const league = await getOrCreateDefaultLeague();
+      await updateLeaguePoints(userId, league.id, userLevel);
+    }
+  } catch (err) {
+    console.warn('[match.service] updateMatchLeagueStats error:', err);
+  }
 }

@@ -27,13 +27,14 @@ export interface PracticeStats {
 
 /**
  * Record a new practice session
+ * Also increments casual_match_count for casual mode progression
  */
 export async function recordPracticeSession(
   userId: string,
   exerciseType: 'push_ups' | 'squats',
   reps: number,
   notes: string = ''
-): Promise<PracticeSession> {
+): Promise<{ session: PracticeSession; casualCountNow: number; unlockedCompetitive: boolean }> {
   const { data, error } = await (supabase.rpc as any)('record_practice_session', {
     p_user_id: userId,
     p_exercise_type: exerciseType,
@@ -41,7 +42,30 @@ export async function recordPracticeSession(
     p_notes: notes,
   });
   if (error) throw error;
-  return data as PracticeSession;
+  const session = data as PracticeSession;
+
+  // Increment casual_match_count
+  const { data: profile, error: getErr } = await (supabase.from('profiles') as any)
+    .select('casual_match_count')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (getErr || !profile) {
+    return { session, casualCountNow: 0, unlockedCompetitive: false };
+  }
+
+  const currentCount = (profile.casual_match_count ?? 0) + 1;
+  const unlockedCompetitive = currentCount >= 10;
+
+  const { error: updateErr } = await (supabase.from('profiles') as any)
+    .update({ casual_match_count: currentCount })
+    .eq('id', userId);
+
+  if (updateErr) {
+    console.warn('[practice.service] Failed to increment casual_match_count:', updateErr);
+  }
+
+  return { session, casualCountNow: currentCount, unlockedCompetitive };
 }
 
 /**

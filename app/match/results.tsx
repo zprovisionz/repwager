@@ -11,7 +11,7 @@ import { theatreService } from '@/services/theatre.service';
 import Button from '@/components/ui/Button';
 import { LevelUpAnimation } from '@/components/LevelUpAnimation';
 import { checkAndAwardBadges } from '@/services/badge.service';
-import { getMatch, fileDispute } from '@/services/match.service';
+import { getMatch, fileDispute, updateMatchLeagueStats } from '@/services/match.service';
 import { getOpponentData, hasUserSubmitted, hasOpponentSubmitted } from '@/services/asyncMatch.service';
 import { incrementStreak, decrementStreak, updateLastActiveDate, getStreakStatus } from '@/services/streak.service';
 import { calculateLevel } from '@/lib/levelSystem';
@@ -139,6 +139,14 @@ export default function ResultsScreen() {
           }
         } catch (err) {
           console.warn('[results] Streak update failed:', err);
+        }
+
+        // Update league stats
+        try {
+          const userLevel = calculateLevel(profile.total_xp ?? 0);
+          await updateMatchLeagueStats(session.user.id, userLevel, won);
+        } catch (err) {
+          console.warn('[results] League update failed:', err);
         }
       })();
 

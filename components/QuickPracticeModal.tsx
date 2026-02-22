@@ -7,6 +7,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { colors, typography, spacing, radius } from '@/lib/theme';
 import { X, Dumbbell, Check } from 'lucide-react-native';
 import { useAuthStore } from '@/stores/authStore';
+import { useToastStore } from '@/stores/toastStore';
 import { usePoseDetection } from '@/hooks/usePoseDetection';
 import { recordPracticeSession } from '@/services/practice.service';
 
@@ -21,7 +22,8 @@ interface QuickPracticeModalProps {
 
 export default function QuickPracticeModal({ visible, onClose }: QuickPracticeModalProps) {
   const insets = useSafeAreaInsets();
-  const { session } = useAuthStore();
+  const { session, refreshProfile } = useAuthStore();
+  const { show: showToast } = useToastStore();
   const [permission, requestPermission] = useCameraPermissions();
   const [exercise, setExercise] = useState<'push_ups' | 'squats'>('push_ups');
   const [phase, setPhase] = useState<PracticePhase>('select');
@@ -51,8 +53,21 @@ export default function QuickPracticeModal({ visible, onClose }: QuickPracticeMo
     setPhase('done');
     if (session?.user && reps > 0) {
       try {
-        await recordPracticeSession(session.user.id, exercise, reps);
-      } catch {}
+        const result = await recordPracticeSession(session.user.id, exercise, reps);
+
+        // Show unlock toast if competitive mode just unlocked
+        if (result.unlockedCompetitive) {
+          showToast({
+            type: 'success',
+            title: '🎉 Competitive Mode Unlocked!',
+            message: 'You can now wager real money in matches.',
+          });
+          // Refresh profile to update UI
+          await refreshProfile();
+        }
+      } catch (err) {
+        console.warn('[QuickPracticeModal] Failed to record session:', err);
+      }
     }
   }
 
