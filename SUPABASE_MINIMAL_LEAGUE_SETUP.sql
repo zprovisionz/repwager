@@ -85,12 +85,13 @@ CREATE TABLE IF NOT EXISTS league_settings (
 );
 
 -- 6. CREATE PLAYOFF_MATCHES TABLE
+-- Note: match_id removed to avoid foreign key dependency on non-existent 'matches' table
+-- Can be added later when the 'matches' table is created
 CREATE TABLE IF NOT EXISTS playoff_matches (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   league_id uuid NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
   round_number integer NOT NULL CHECK (round_number >= 1),
   round_name text NOT NULL,
-  match_id uuid REFERENCES matches(id) ON DELETE SET NULL,
   seed_a integer NOT NULL,
   seed_b integer NOT NULL,
   winner_seed integer,
