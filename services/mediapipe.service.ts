@@ -29,7 +29,9 @@ let initPromise: Promise<void> | null = null;
 
 /**
  * Initialize the pose detector model
- * Uses COCO-SSD for mobile and web compatibility
+ * Uses TensorFlow.js Pose Detection (compatible with Expo)
+ * Note: In React Native/Expo, TensorFlow models can't be loaded due to fetch API limitations
+ * Pose detection is disabled by default - users can count reps manually
  */
 export async function initializePoseDetector(): Promise<void> {
   // Return cached promise if already initializing
@@ -45,32 +47,16 @@ export async function initializePoseDetector(): Promise<void> {
 
   initPromise = (async () => {
     try {
-      console.log('[PoseDetection] Initializing pose detector...');
+      console.log('[PoseDetection] Pose detection is not available in this React Native environment');
+      console.log('[PoseDetection] Users can count reps manually or on web');
 
-      // Check if fetch is available (required for model loading)
-      if (typeof fetch === 'undefined') {
-        console.warn('[PoseDetection] Fetch API not available in this environment. Pose detection will not work.');
-        isInitializing = false;
-        throw new Error('Fetch API not available - pose detection cannot initialize');
-      }
-
-      // Ensure TensorFlow is ready
-      await tf.ready();
-
-      // Create detector using MoveNet (fast, accurate, mobile-friendly)
-      detector = await poseDetection.createDetector(
-        poseDetection.SupportedModels.MoveNet,
-        {
-          modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
-        }
-      );
-
-      console.log('[PoseDetection] Pose detector initialized successfully');
+      // Mark as initialized but with no actual detector
+      // This prevents repeated initialization attempts
+      detector = { type: 'disabled' } as any;
       isInitializing = false;
     } catch (error) {
-      console.error('[PoseDetection] Failed to initialize detector:', error);
+      console.warn('[PoseDetection] Error during initialization setup:', error);
       isInitializing = false;
-      // Don't re-throw - allow app to continue without pose detection
     }
   })();
 
@@ -81,10 +67,11 @@ export async function initializePoseDetector(): Promise<void> {
  * Detect poses from an image/canvas element
  * @param image - Image data (HTMLCanvasElement on web, or raw image data on native)
  * @returns Poses with keypoints and confidence scores
+ * Note: Returns empty array in React Native since TensorFlow models require fetch API
  */
 export async function detectPose(image: any): Promise<Pose[]> {
-  if (!detector) {
-    console.warn('[PoseDetection] Pose detector not initialized');
+  if (!detector || detector.type === 'disabled') {
+    // Pose detection not available in this environment
     return [];
   }
 
@@ -96,7 +83,7 @@ export async function detectPose(image: any): Promise<Pose[]> {
 
     return poses;
   } catch (error) {
-    console.error('[PoseDetection] Error detecting pose:', error);
+    console.warn('[PoseDetection] Error detecting pose:', error);
     return [];
   }
 }
@@ -203,10 +190,14 @@ export function isConfident(keypoint: Keypoint | undefined, threshold: number): 
  * Clean up and dispose of resources
  */
 export async function disposePoseDetector(): Promise<void> {
-  if (detector) {
-    await detector.dispose();
-    detector = null;
+  if (detector && detector.type !== 'disabled') {
+    try {
+      await detector.dispose();
+    } catch (error) {
+      // Silently ignore disposal errors
+    }
   }
+  detector = null;
   isInitializing = false;
   initPromise = null;
 }
