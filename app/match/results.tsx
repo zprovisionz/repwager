@@ -6,11 +6,12 @@ import { colors, typography, spacing, radius } from '@/lib/theme';
 import { useAuthStore } from '@/stores/authStore';
 import { useMatchStore } from '@/stores/matchStore';
 import { useToastStore } from '@/stores/toastStore';
-import { Trophy, Frown, Zap, Clock } from 'lucide-react-native';
+import { Trophy, Frown, Zap, Clock, Flame, Shield } from 'lucide-react-native';
 import Button from '@/components/ui/Button';
 import { checkAndAwardBadges } from '@/services/badge.service';
 import { getMatch, subscribeToMatch } from '@/services/match.service';
 import { getAsyncPhase, getMinutesUntilDeadline } from '@/services/asyncMatch.service';
+import { incrementStreak, decrementStreak } from '@/services/streak.service';
 import type { Match } from '@/types/database';
 
 function ConfettiPiece({ delay, color }: { delay: number; color: string }) {
@@ -63,6 +64,8 @@ export default function ResultsScreen() {
   const [deadlineMinutes, setDeadlineMinutes] = useState<number | null>(null);
   const subscriptionRef = useRef<any>(null);
   const deadlineTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Guard: only fire streak update once per results screen visit
+  const streakUpdatedRef = useRef(false);
 
   const won = isWinner === 'true';
   const reps = parseInt(myReps ?? '0');
@@ -122,6 +125,48 @@ export default function ResultsScreen() {
       setActiveMatch(null);
     };
   }, []);
+
+  // ── Streak update: fires once when match reaches completed status ─────────
+  useEffect(() => {
+    if (!match || !session?.user || streakUpdatedRef.current) return;
+    if (match.status !== 'completed' || match.winner_id === null) return;
+
+    streakUpdatedRef.current = true;
+    const matchWon = match.winner_id === session.user.id;
+    const hasFreeze = profile?.streak_freeze_available ?? false;
+
+    console.log('[ResultsScreen] streak update — won:', matchWon, '| hasFreeze:', hasFreeze);
+
+    const updateFn = matchWon
+      ? () => incrementStreak(session.user.id)
+      : () => decrementStreak(session.user.id, hasFreeze);
+
+    updateFn()
+      .then((result) => {
+        console.log('[ResultsScreen] streak result:', result);
+
+        if (result.usedFreeze) {
+          showToast({
+            type: 'success',
+            title: 'Streak Freeze Used! 🛡️',
+            message: `Your ${result.currentStreak}-win streak is preserved.`,
+          });
+        }
+
+        if (result.grantedFreeze) {
+          showToast({
+            type: 'badge',
+            title: '7-Day Streak!',
+            message: 'Streak Freeze unlocked — one loss covered.',
+          });
+        }
+
+        refreshProfile();
+      })
+      .catch((err) => {
+        console.error('[ResultsScreen] streak update error:', err);
+      });
+  }, [match]);
 
   // ── Derived async state ──────────────────────────────────────────────────
   const isChallenger = match?.challenger_id === session?.user?.id;
@@ -188,6 +233,19 @@ export default function ResultsScreen() {
             <Text style={styles.statLabel}>Your Score</Text>
             <Text style={styles.statValue}>{reps} reps</Text>
           </View>
+
+          {bothSubmitted && (
+            <View style={[styles.statRow, styles.statRowBorder]}>
+              <Flame size={18} color={colors.secondary} />
+              <Text style={styles.statLabel}>Win Streak</Text>
+              <View style={styles.streakValueRow}>
+                <Text style={styles.statValue}>{profile?.current_streak ?? 0}</Text>
+                {profile?.streak_freeze_available && (
+                  <Shield size={14} color={colors.primary} />
+                )}
+              </View>
+            </View>
+          )}
 
           <View style={[styles.statRow, styles.statRowBorder]}>
             {opponentReps !== null ? (
@@ -335,6 +393,11 @@ const styles = StyleSheet.create({
   },
   winColor: { color: colors.success },
   loseColor: { color: colors.error },
+  streakValueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
   pendingBanner: {
     width: '100%',
     flexDirection: 'row',

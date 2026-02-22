@@ -9,8 +9,17 @@ import { getUserMatches, getOpenChallenges, acceptMatch } from '@/services/match
 import { useToastStore } from '@/stores/toastStore';
 import MatchCard from '@/components/MatchCard';
 import Avatar from '@/components/Avatar';
-import { Plus, Zap, DollarSign, Flame, Target, Trophy } from 'lucide-react-native';
+import { Plus, Zap, DollarSign, Flame, Target, Trophy, Shield } from 'lucide-react-native';
 import type { Match } from '@/types/database';
+
+function formatFreezeDate(iso: string | null | undefined): string {
+  if (!iso) return 'recently';
+  const d = new Date(iso);
+  const diffDays = Math.floor((Date.now() - d.getTime()) / 86_400_000);
+  if (diffDays === 0) return 'today';
+  if (diffDays === 1) return 'yesterday';
+  return `${diffDays} days ago`;
+}
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -100,11 +109,31 @@ export default function HomeScreen() {
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statBlock}>
-              <Flame size={16} color={colors.secondary} />
+              <View style={styles.streakIconRow}>
+                <Flame size={16} color={colors.secondary} />
+                {profile?.streak_freeze_available && (
+                  <Shield size={13} color={colors.primary} />
+                )}
+              </View>
               <Text style={styles.statValue}>{profile?.current_streak ?? 0}</Text>
               <Text style={styles.statLabel}>Streak</Text>
             </View>
           </View>
+
+          {/* Freeze status hint — only shown when user has interacted with freezes */}
+          {(profile?.streak_freeze_available || profile?.streak_freeze_used_at) && (
+            <View style={styles.freezeRow}>
+              <Shield
+                size={12}
+                color={profile?.streak_freeze_available ? colors.primary : colors.textMuted}
+              />
+              <Text style={styles.freezeText}>
+                {profile?.streak_freeze_available
+                  ? 'Freeze: Available'
+                  : `Freeze: Used ${formatFreezeDate(profile?.streak_freeze_used_at)}`}
+              </Text>
+            </View>
+          )}
         </View>
       </LinearGradient>
 
@@ -326,5 +355,22 @@ const styles = StyleSheet.create({
     fontFamily: typography.fontBodyBold,
     fontSize: 14,
     color: colors.textInverse,
+  },
+  streakIconRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  freezeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+    paddingHorizontal: spacing.xs,
+  },
+  freezeText: {
+    fontFamily: typography.fontBody,
+    fontSize: 11,
+    color: colors.textMuted,
   },
 });

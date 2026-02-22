@@ -20,6 +20,8 @@ export interface Database {
           wins: number;
           losses: number;
           total_reps: number;
+          streak_freeze_available: boolean;
+          streak_freeze_used_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -136,6 +138,14 @@ export interface Database {
       submit_async_score: {
         Args: { p_match_id: string; p_user_id: string; p_reps: number };
         Returns: Database['public']['Tables']['matches']['Row'];
+      };
+      update_streak: {
+        Args: { p_user_id: string; p_won: boolean };
+        Returns: { current_streak: number; longest_streak: number; granted_freeze: boolean; used_freeze: boolean };
+      };
+      grant_streak_freeze: {
+        Args: { p_user_id: string };
+        Returns: void;
       };
     };
   };
