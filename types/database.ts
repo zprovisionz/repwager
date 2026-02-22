@@ -43,6 +43,9 @@ export interface Database {
           started_at: string | null;
           completed_at: string | null;
           expires_at: string;
+          submission_deadline: string | null;
+          challenger_submitted_at: string | null;
+          opponent_submitted_at: string | null;
           dispute_reason: string | null;
           created_at: string;
           updated_at: string;
@@ -128,6 +131,10 @@ export interface Database {
       };
       cancel_match: {
         Args: { p_match_id: string };
+        Returns: Database['public']['Tables']['matches']['Row'];
+      };
+      submit_async_score: {
+        Args: { p_match_id: string; p_user_id: string; p_reps: number };
         Returns: Database['public']['Tables']['matches']['Row'];
       };
     };
