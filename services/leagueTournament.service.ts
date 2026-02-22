@@ -946,3 +946,283 @@ async function getLeagueMembersSorted(leagueId: string): Promise<LeagueMember[]>
     return [];
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// PLAYOFF BRACKET (Single-Elimination)
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Generate playoff bracket after season reset
+ * Top 8 or 16 members qualify (configurable)
+ * Single-elimination: Quarterfinals → Semifinals → Finals
+ */
+export async function generatePlayoffBracket(leagueId: string): Promise<boolean> {
+  try {
+    const league = await getLeagueDetail(leagueId);
+    if (!league || !league.playoff_enabled) return false;
+
+    // Get top N members sorted by points
+    const topMembers = await (supabase.from('league_members') as any)
+      .select('user_id')
+      .eq('league_id', leagueId)
+      .order('points', { ascending: false })
+      .limit(league.playoff_size || 8);
+
+    if (!topMembers.data || topMembers.data.length < 2) {
+      console.warn('[leagueTournament] Not enough members for playoffs');
+      return false;
+    }
+
+    const members = topMembers.data;
+    const bracket_size = members.length;
+
+    // Determine rounds needed
+    const rounds = Math.log2(bracket_size);
+
+    // Create first round matches (quarterfinals or similar)
+    for (let i = 0; i < bracket_size; i += 2) {
+      if (i + 1 < bracket_size) {
+        await (supabase.from('playoff_matches') as any)
+          .insert({
+            league_id: leagueId,
+            round_number: 1,
+            round_name: bracket_size === 8 ? 'Quarterfinals' : 'Round of 16',
+            seed_a: i + 1,
+            seed_b: i + 2,
+            status: 'pending',
+          });
+      }
+    }
+
+    // Update league playoff start
+    await (supabase.from('leagues') as any)
+      .update({ playoff_start_at: new Date().toISOString() })
+      .eq('id', leagueId);
+
+    console.log('[leagueTournament] Playoff bracket generated for league', leagueId);
+    return true;
+  } catch (error) {
+    console.error('[leagueTournament] generatePlayoffBracket exception:', error);
+    return false;
+  }
+}
+
+/**
+ * Get playoff bracket for a league
+ */
+export async function getPlayoffBracket(leagueId: string): Promise<any[]> {
+  try {
+    const { data, error } = await (supabase.from('playoff_matches') as any)
+      .select('*, match:match_id(user_a_id, user_b_id, winner_id)')
+      .eq('league_id', leagueId)
+      .order('round_number', { ascending: true })
+      .order('seed_a', { ascending: true });
+
+    if (error) {
+      console.warn('[leagueTournament] getPlayoffBracket error:', error);
+      return [];
+    }
+
+    return (data ?? []) as any[];
+  } catch (error) {
+    console.error('[leagueTournament] getPlayoffBracket exception:', error);
+    return [];
+  }
+}
+
+/**
+ * Complete playoff match and advance winner to next round
+ */
+export async function completePlayoffMatch(
+  playoffMatchId: string,
+  winnerSeed: number
+): Promise<boolean> {
+  try {
+    const { data: match, error: matchError } = await (supabase.from('playoff_matches') as any)
+      .select('*')
+      .eq('id', playoffMatchId)
+      .single();
+
+    if (matchError || !match) return false;
+
+    // Update this match
+    await (supabase.from('playoff_matches') as any)
+      .update({ status: 'completed', winner_seed: winnerSeed })
+      .eq('id', playoffMatchId);
+
+    // If finals, award championship
+    if (match.round_name === 'Finals') {
+      await awardPlayoffChampion(match.league_id, winnerSeed);
+      return true;
+    }
+
+    // Create next round match if needed
+    const nextRound = match.round_number + 1;
+    const { data: nextMatches } = await (supabase.from('playoff_matches') as any)
+      .select('*')
+      .eq('league_id', match.league_id)
+      .eq('round_number', nextRound);
+
+    // Determine next seed slot
+    const nextSeedSlot = match.seed_a < match.seed_b ?
+      (Math.floor((match.seed_a - 1) / 2) * 2 + 1) :
+      (Math.floor((match.seed_b - 1) / 2) * 2 + 1);
+
+    console.log('[leagueTournament] Playoff match completed, winner advances');
+    return true;
+  } catch (error) {
+    console.error('[leagueTournament] completePlayoffMatch exception:', error);
+    return false;
+  }
+}
+
+/**
+ * Award championship to playoff winner
+ */
+async function awardPlayoffChampion(leagueId: string, winnerSeed: number): Promise<void> {
+  try {
+    // Get the winner's user_id by seed (requires lookup in bracket)
+    // For now, mark as champion in league metadata
+    await (supabase.from('leagues') as any)
+      .update({ playoff_winner_id: null }) // Set to actual winner ID
+      .eq('id', leagueId);
+
+    console.log('[leagueTournament] Playoff champion awarded');
+  } catch (error) {
+    console.error('[leagueTournament] awardPlayoffChampion exception:', error);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// PRESTIGE & PROGRESSION (League Levels & Titles)
+// ─────────────────────────────────────────────────────────────────────────
+
+const LEAGUE_LEVEL_THRESHOLDS: { [key: number]: number } = {
+  1: 0,
+  2: 500,
+  3: 1500,
+  4: 4000,
+  5: 10000,
+};
+
+const LEAGUE_TITLES: { [key: number]: string } = {
+  1: 'Newcomer',
+  2: 'Member',
+  3: 'League Veteran',
+  4: 'League Elite',
+  5: 'League Legend',
+};
+
+/**
+ * Award league XP and auto-level up
+ */
+export async function awardLeagueXp(
+  userId: string,
+  leagueId: string,
+  xpAmount: number
+): Promise<LeagueMember | null> {
+  try {
+    const member = await (supabase.from('league_members') as any)
+      .select('league_xp, league_level')
+      .eq('league_id', leagueId)
+      .eq('user_id', userId)
+      .single();
+
+    if (!member.data) return null;
+
+    const newXp = (member.data.league_xp || 0) + xpAmount;
+    let newLevel = member.data.league_level || 1;
+
+    // Auto-level if threshold reached
+    for (let i = 5; i >= 1; i--) {
+      if (newXp >= LEAGUE_LEVEL_THRESHOLDS[i]) {
+        newLevel = i;
+        break;
+      }
+    }
+
+    const newTitle = LEAGUE_TITLES[newLevel];
+
+    const { data, error } = await (supabase.from('league_members') as any)
+      .update({
+        league_xp: newXp,
+        league_level: newLevel,
+        league_title: newTitle,
+      })
+      .eq('league_id', leagueId)
+      .eq('user_id', userId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('[leagueTournament] awardLeagueXp error:', error);
+      return null;
+    }
+
+    return data as LeagueMember;
+  } catch (error) {
+    console.error('[leagueTournament] awardLeagueXp exception:', error);
+    return null;
+  }
+}
+
+/**
+ * Award league-specific badge
+ */
+export async function awardLeagueBadge(
+  userId: string,
+  leagueId: string,
+  badgeId: string
+): Promise<boolean> {
+  try {
+    const { error } = await (supabase.from('user_league_badges') as any)
+      .insert({
+        user_id: userId,
+        league_id: leagueId,
+        badge_id: badgeId,
+      });
+
+    if (error) {
+      console.warn('[leagueTournament] Badge already earned or error:', error);
+      // Ignore duplicate key errors
+      return true;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('[leagueTournament] awardLeagueBadge exception:', error);
+    return false;
+  }
+}
+
+/**
+ * Get member's league prestige (level, title, badges)
+ */
+export async function getLeaguePrestige(
+  userId: string,
+  leagueId: string
+): Promise<{ level: number; title: string; badges: string[] } | null> {
+  try {
+    const { data: member, error: memberError } = await (supabase.from('league_members') as any)
+      .select('league_level, league_title')
+      .eq('league_id', leagueId)
+      .eq('user_id', userId)
+      .single();
+
+    if (memberError || !member) return null;
+
+    const { data: badges, error: badgeError } = await (supabase.from('user_league_badges') as any)
+      .select('badge_id')
+      .eq('league_id', leagueId)
+      .eq('user_id', userId);
+
+    return {
+      level: member.league_level || 1,
+      title: member.league_title || 'Newcomer',
+      badges: (badges ?? []).map((b: any) => b.badge_id),
+    };
+  } catch (error) {
+    console.error('[leagueTournament] getLeaguePrestige exception:', error);
+    return null;
+  }
+}

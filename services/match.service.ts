@@ -185,7 +185,9 @@ export function subscribeToMatch(matchId: string, callback: (match: Match) => vo
 
 /**
  * Handle post-match league updates (called after match completion)
- * Enrolls user in default league and awards points if they won
+ * - Auto-enrolls user in default league
+ * - Awards league points (3 for win, 0 for loss)
+ * - Awards league XP for prestige progression
  */
 export async function updateMatchLeagueStats(
   userId: string,
@@ -196,10 +198,23 @@ export async function updateMatchLeagueStats(
     // Auto-enroll in default league
     await autoEnrollUserInDefaultLeague(userId);
 
-    // Award points if winner
+    const league = await getOrCreateDefaultLeague();
+    if (!league) return;
+
     if (isWinner) {
-      const league = await getOrCreateDefaultLeague();
+      // Award league points (3pts per win, scaled by opponent level)
       await updateLeaguePoints(userId, league.id, userLevel);
+
+      // Award league XP (prestige progression)
+      // Import from updated service
+      const { awardLeagueXp } = await import('@/services/leagueTournament.service');
+      await awardLeagueXp(userId, league.id, 50); // 50 XP per win
+
+      console.log('[League Integration] Awarded points + XP for match', {
+        userId,
+        leagueId: league.id,
+        xp: 50,
+      });
     }
   } catch (err) {
     console.warn('[match.service] updateMatchLeagueStats error:', err);

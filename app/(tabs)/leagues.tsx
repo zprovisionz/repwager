@@ -1,466 +1,519 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, FlatList, RefreshControl, ActivityIndicator } from 'react-native';
+/*
+  Leagues Tab Screen (Enhanced)
+
+  Main hub for league discovery, membership, and prestige:
+  - My Leagues: Joined leagues with prestige display
+  - Discover: Public leagues to join
+  - Features: Create league, view detail, playoffs, prestige levels
+*/
+
+import { useEffect, useState, useRef } from 'react';
+import {
+  View,
+  ScrollView,
+  TouchableOpacity,
+  StyleSheet,
+  Text,
+  ActivityIndicator,
+  RefreshControl,
+  FlatList,
+} from 'react-native';
+import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useAuthStore } from '@/stores/authStore';
-import { useToastStore } from '@/stores/toastStore';
 import { colors, typography, spacing, radius } from '@/lib/theme';
+import { useAuthStore } from '@/stores/authStore';
+import { useLeagueStore } from '@/store/leagueStore';
 import {
   getPublicLeagues,
-  getLeagueMembers,
-  getUserLeagueRank,
-  joinLeague,
-  subscribeToLeagueMembers,
+  getUserLeagues,
+  getLeaguePrestige,
   type League,
-  type LeagueMemb,
-} from '@/services/league.service';
-import Avatar from '@/components/Avatar';
-import { Trophy, Medal, TrendingUp, Zap } from 'lucide-react-native';
+} from '@/services/leagueTournament.service';
+import { Trophy, Plus, Sparkles, Crown, Zap } from 'lucide-react-native';
 
-export default function LeaguesScreen() {
+export default function LeaguesTabScreen() {
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const { session, profile } = useAuthStore();
-  const { show: showToast } = useToastStore();
+  const {
+    myLeagues,
+    loading,
+    fetchMyLeagues,
+    setCurrentLeague,
+  } = useLeagueStore();
 
-  const [leagues, setLeagues] = useState<League[]>([]);
-  const [selectedLeague, setSelectedLeague] = useState<League | null>(null);
-  const [members, setMembers] = useState<LeagueMemb[]>([]);
-  const [userRank, setUserRank] = useState<{ rank: number; points: number } | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [publicLeagues, setPublicLeagues] = useState<League[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [joining, setJoining] = useState(false);
-  const subscriptionRef = useRef<any>(null);
-
-  async function loadLeagues() {
-    try {
-      const data = await getPublicLeagues();
-      setLeagues(data);
-      if (data.length > 0) {
-        await loadLeagueDetails(data[0]);
-      }
-    } catch (err) {
-      console.error('[leagues] loadLeagues error:', err);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }
-
-  async function loadLeagueDetails(league: League) {
-    try {
-      setSelectedLeague(league);
-
-      // Load members
-      const memberData = await getLeagueMembers(league.id);
-      setMembers(memberData);
-
-      // Load user's rank
-      if (session?.user) {
-        const rank = await getUserLeagueRank(session.user.id, league.id);
-        setUserRank(rank);
-      }
-
-      // Subscribe to realtime updates
-      if (subscriptionRef.current) {
-        subscriptionRef.current.unsubscribe();
-      }
-      subscriptionRef.current = subscribeToLeagueMembers(league.id, (updated) => {
-        setMembers(updated);
-      });
-    } catch (err) {
-      console.error('[leagues] loadLeagueDetails error:', err);
-    }
-  }
-
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    if (selectedLeague) {
-      await loadLeagueDetails(selectedLeague);
-    }
-  }, [selectedLeague]);
-
-  async function handleJoinLeague() {
-    if (!session?.user || !selectedLeague) return;
-    setJoining(true);
-    try {
-      await joinLeague(session.user.id, selectedLeague.id);
-      showToast({ type: 'success', title: 'Joined league!', message: 'Welcome to the competition.' });
-      await loadLeagueDetails(selectedLeague);
-    } catch (err) {
-      showToast({ type: 'error', title: 'Failed to join', message: (err as Error).message });
-    } finally {
-      setJoining(false);
-    }
-  }
+  const [loadingPublic, setLoadingPublic] = useState(false);
+  const [prestigeMap, setPrestigeMap] = useState<{ [leagueId: string]: any }>({});
 
   useEffect(() => {
-    loadLeagues();
-    return () => {
-      if (subscriptionRef.current) {
-        subscriptionRef.current.unsubscribe();
+    if (session?.user?.id) {
+      loadData();
+    }
+  }, [session?.user?.id]);
+
+  const loadData = async () => {
+    if (!session?.user?.id) return;
+    await fetchMyLeagues(session.user.id);
+    await loadPublic();
+    await loadPrestige();
+  };
+
+  const loadPublic = async () => {
+    try {
+      setLoadingPublic(true);
+      const leagues = await getPublicLeagues({ search: '' });
+      setPublicLeagues(leagues.slice(0, 6)); // Show top 6
+    } catch (error) {
+      console.error('Failed to load public leagues:', error);
+    } finally {
+      setLoadingPublic(false);
+    }
+  };
+
+  const loadPrestige = async () => {
+    if (!session?.user?.id) return;
+    try {
+      const prestige: { [key: string]: any } = {};
+      for (const league of myLeagues) {
+        const p = await getLeaguePrestige(session.user.id, league.id);
+        if (p) prestige[league.id] = p;
       }
-    };
-  }, []);
+      setPrestigeMap(prestige);
+    } catch (error) {
+      console.error('Failed to load prestige:', error);
+    }
+  };
 
-  if (loading) {
-    return (
-      <View style={[styles.container, styles.centerContent]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
-  }
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await loadData();
+    setRefreshing(false);
+  };
 
-  const isMember = userRank !== null;
-  const top3 = members.slice(0, 3);
+  const handleLeagueTap = (league: League) => {
+    setCurrentLeague(league);
+    router.push(`/leagues/${league.id}`);
+  };
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+        }
       >
-        {/* HEADER */}
+        {/* Header */}
         <View style={styles.header}>
-          <Trophy size={28} color={colors.primary} />
-          <Text style={styles.headerTitle}>Leagues</Text>
+          <View style={styles.headerContent}>
+            <Trophy size={28} color={colors.primary} />
+            <View style={styles.headerText}>
+              <Text style={styles.title}>Leagues</Text>
+              <Text style={styles.subtitle}>
+                {myLeagues.length} {myLeagues.length === 1 ? 'league' : 'leagues'}
+              </Text>
+            </View>
+          </View>
+          <TouchableOpacity
+            style={styles.createButton}
+            onPress={() => router.push('/leagues/create')}
+          >
+            <Plus size={20} color={colors.textInverse} />
+          </TouchableOpacity>
         </View>
 
-        {/* LEAGUES LIST */}
-        {leagues.length > 0 ? (
-          <>
-            <View style={styles.leaguesList}>
-              {leagues.map((league) => (
-                <TouchableOpacity
-                  key={league.id}
-                  style={[
-                    styles.leagueCard,
-                    selectedLeague?.id === league.id && styles.leagueCardActive,
-                  ]}
-                  onPress={() => loadLeagueDetails(league)}
-                >
-                  <View style={styles.leagueCardContent}>
-                    <Text style={styles.leagueName}>{league.name}</Text>
-                    <Text style={styles.leagueType}>{league.type === 'PUBLIC' ? 'Public' : 'Private'}</Text>
-                  </View>
-                  {isMember && userRank && (
-                    <View style={styles.userRankBadge}>
-                      <Text style={styles.userRankText}>#{userRank.rank}</Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-              ))}
+        {/* My Leagues Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>My Leagues</Text>
+
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={colors.primary} />
             </View>
+          ) : myLeagues.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyIcon}>🏟️</Text>
+              <Text style={styles.emptyTitle}>No Leagues Yet</Text>
+              <Text style={styles.emptyText}>
+                Create a league or join one to start competing!
+              </Text>
+              <TouchableOpacity
+                style={styles.emptyButton}
+                onPress={() => router.push('/leagues/create')}
+              >
+                <Text style={styles.emptyButtonText}>Create League</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            myLeagues.map((league) => (
+              <LeagueCard
+                key={league.id}
+                league={league}
+                prestige={prestigeMap[league.id]}
+                onPress={() => handleLeagueTap(league)}
+              />
+            ))
+          )}
+        </View>
 
-            {selectedLeague && (
-              <>
-                {/* SEASON INFO */}
-                <View style={styles.seasonCard}>
-                  <Zap size={16} color={colors.accent} />
-                  <Text style={styles.seasonText}>Season: {selectedLeague.season}</Text>
-                </View>
-
-                {/* REWARDS */}
-                <Text style={styles.sectionTitle}>Top Rewards</Text>
-                <View style={styles.rewardsRow}>
-                  {[
-                    { rank: 1, emoji: '🥇', xp: 'Gold Badge' },
-                    { rank: 2, emoji: '🥈', xp: '+500 XP' },
-                    { rank: 3, emoji: '🥉', xp: '+250 XP' },
-                  ].map((reward) => (
-                    <View key={reward.rank} style={styles.rewardCard}>
-                      <Text style={styles.rewardEmoji}>{reward.emoji}</Text>
-                      <Text style={styles.rewardLabel}>#{reward.rank}</Text>
-                      <Text style={styles.rewardAmount}>{reward.xp}</Text>
-                    </View>
-                  ))}
-                </View>
-
-                {/* USER STATUS */}
-                {isMember ? (
-                  <View style={styles.memberCard}>
-                    <View style={styles.memberRow}>
-                      <Text style={styles.memberLabel}>Your Rank</Text>
-                      <Text style={styles.memberValue}>#{userRank?.rank}</Text>
-                    </View>
-                    <View style={styles.memberRow}>
-                      <Text style={styles.memberLabel}>Points</Text>
-                      <Text style={styles.memberValue}>{userRank?.points}</Text>
-                    </View>
-                  </View>
-                ) : (
-                  <TouchableOpacity
-                    style={styles.joinBtn}
-                    onPress={handleJoinLeague}
-                    disabled={joining}
-                  >
-                    {joining ? (
-                      <ActivityIndicator size="small" color={colors.textInverse} />
-                    ) : (
-                      <Text style={styles.joinBtnText}>JOIN LEAGUE</Text>
-                    )}
-                  </TouchableOpacity>
-                )}
-
-                {/* LEADERBOARD */}
-                <Text style={styles.sectionTitle}>Leaderboard</Text>
-                <View style={styles.leaderboardCard}>
-                  <FlatList
-                    data={members}
-                    keyExtractor={(item) => item.id}
-                    scrollEnabled={false}
-                    renderItem={({ item, index }) => (
-                      <View
-                        style={[
-                          styles.rankRow,
-                          index < members.length - 1 && styles.rankRowBorder,
-                          item.user_id === session?.user?.id && styles.rankRowActive,
-                        ]}
-                      >
-                        <View style={styles.rankLeft}>
-                          <Text style={styles.rankNumber}>#{item.rank}</Text>
-                          {item.rank <= 3 && (
-                            <Text style={styles.rankMedal}>
-                              {item.rank === 1 ? '🥇' : item.rank === 2 ? '🥈' : '🥉'}
-                            </Text>
-                          )}
-                        </View>
-                        <View style={styles.rankCenter}>
-                          <Text style={styles.rankName}>{item.profile?.display_name || 'Unknown'}</Text>
-                        </View>
-                        <Text style={styles.rankPoints}>{item.points} pts</Text>
-                      </View>
-                    )}
-                  />
-                </View>
-              </>
-            )}
-          </>
-        ) : (
-          <View style={styles.emptyState}>
-            <Trophy size={48} color={colors.primary} />
-            <Text style={styles.emptyTitle}>No Leagues Yet</Text>
-            <Text style={styles.emptyText}>Check back soon for seasonal competitions.</Text>
+        {/* Discover Section */}
+        <View style={styles.section}>
+          <View style={styles.discoverHeader}>
+            <Text style={styles.sectionTitle}>Discover</Text>
+            <TouchableOpacity
+              onPress={() => router.push('/leagues/discover')}
+            >
+              <Text style={styles.seeAllLink}>See All →</Text>
+            </TouchableOpacity>
           </View>
-        )}
+
+          {loadingPublic ? (
+            <ActivityIndicator size="small" color={colors.primary} />
+          ) : publicLeagues.length === 0 ? (
+            <Text style={styles.noLeaguesText}>No public leagues available</Text>
+          ) : (
+            publicLeagues.map((league) => (
+              <PublicLeagueCard
+                key={league.id}
+                league={league}
+                onPress={() => handleLeagueTap(league)}
+              />
+            ))
+          )}
+        </View>
+
+        {/* Tips Section */}
+        <View style={styles.section}>
+          <View style={styles.tipsCard}>
+            <Sparkles size={20} color={colors.primary} />
+            <View style={styles.tipsContent}>
+              <Text style={styles.tipsTitle}>Earn Prestige</Text>
+              <Text style={styles.tipsText}>
+                Complete league matches to level up and unlock exclusive badges!
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={{ height: spacing.xl }} />
       </ScrollView>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
-  scrollContent: { paddingHorizontal: spacing.md, paddingBottom: 80 },
-  centerContent: { justifyContent: 'center', alignItems: 'center' },
+function LeagueCard({
+  league,
+  prestige,
+  onPress,
+}: {
+  league: League;
+  prestige?: any;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity style={styles.myLeagueCard} onPress={onPress}>
+      <View style={styles.leagueCardHeader}>
+        <View style={styles.leagueCardInfo}>
+          <View style={styles.leagueNameRow}>
+            <Text style={styles.leagueName}>{league.name}</Text>
+            {prestige?.level && prestige.level >= 3 && (
+              <Crown size={16} color={colors.accent} />
+            )}
+          </View>
 
+          <View style={styles.leagueMetaRow}>
+            <View style={styles.focusTypeBadge}>
+              <Text style={styles.focusTypeText}>{league.focus_type}</Text>
+            </View>
+
+            {prestige && (
+              <View style={styles.prestigeBadge}>
+                <Zap size={12} color={colors.primary} />
+                <Text style={styles.prestigeText}>Lvl {prestige.level}</Text>
+              </View>
+            )}
+
+            {league.privacy === 'private' && (
+              <Text style={styles.privateBadgeText}>🔒</Text>
+            )}
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.leagueCardFooter}>
+        <Text style={styles.leagueCardMeta}>
+          {league.member_count || 0} / {league.max_members} members
+        </Text>
+        <Text style={styles.arrowIcon}>→</Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function PublicLeagueCard({
+  league,
+  onPress,
+}: {
+  league: League;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity style={styles.publicLeagueCard} onPress={onPress}>
+      <View>
+        <Text style={styles.publicLeagueName}>{league.name}</Text>
+        <Text style={styles.publicLeagueType}>{league.focus_type}</Text>
+      </View>
+      <Text style={styles.joinArrow}>→</Text>
+    </TouchableOpacity>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.bg,
+  },
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginVertical: spacing.md,
-  },
-  headerTitle: {
-    fontFamily: typography.fontDisplay,
-    fontSize: 24,
-    color: colors.text,
-  },
-
-  leaguesList: { gap: spacing.sm, marginBottom: spacing.lg },
-  leagueCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: colors.bgCard,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  leagueCardActive: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primary + '15',
-  },
-  leagueCardContent: { flex: 1 },
-  leagueName: {
-    fontFamily: typography.fontBodyBold,
-    fontSize: 16,
-    color: colors.text,
-  },
-  leagueType: {
-    fontFamily: typography.fontBody,
-    fontSize: 12,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
-  userRankBadge: {
-    backgroundColor: colors.primary,
-    borderRadius: radius.full,
+    alignItems: 'center',
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-  },
-  userRankText: {
-    fontFamily: typography.fontBodyBold,
-    fontSize: 12,
-    color: colors.textInverse,
-  },
-
-  seasonCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.bgCard,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    marginBottom: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  seasonText: {
-    fontFamily: typography.fontBodyMedium,
-    fontSize: 14,
-    color: colors.text,
-  },
-
-  sectionTitle: {
-    fontFamily: typography.fontDisplayMedium,
-    fontSize: 16,
-    color: colors.text,
-    marginBottom: spacing.md,
-    marginTop: spacing.lg,
-  },
-
-  rewardsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-    marginBottom: spacing.lg,
-  },
-  rewardCard: {
-    flex: 1,
-    backgroundColor: colors.bgCard,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    alignItems: 'center',
-    gap: spacing.xs,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  rewardEmoji: { fontSize: 28 },
-  rewardLabel: {
-    fontFamily: typography.fontBodyBold,
-    fontSize: 12,
-    color: colors.textSecondary,
-  },
-  rewardAmount: {
-    fontFamily: typography.fontBody,
-    fontSize: 11,
-    color: colors.textMuted,
-    textAlign: 'center',
-  },
-
-  memberCard: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    gap: spacing.sm,
-    marginBottom: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  memberRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  memberLabel: {
-    fontFamily: typography.fontBody,
-    fontSize: 14,
-    color: colors.textSecondary,
-  },
-  memberValue: {
-    fontFamily: typography.fontDisplayMedium,
-    fontSize: 16,
-    color: colors.primary,
-  },
-
-  joinBtn: {
-    backgroundColor: colors.primary,
-    borderRadius: radius.md,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-    marginBottom: spacing.lg,
-  },
-  joinBtnText: {
-    fontFamily: typography.fontDisplay,
-    fontSize: 14,
-    color: colors.textInverse,
-    letterSpacing: 2,
-  },
-
-  leaderboardCard: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radius.md,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: spacing.lg,
-  },
-  rankRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
-  },
-  rankRowBorder: {
+    paddingVertical: spacing.lg,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  rankRowActive: {
-    backgroundColor: colors.primary + '10',
-  },
-  rankLeft: {
+  headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
-    minWidth: 50,
-  },
-  rankNumber: {
-    fontFamily: typography.fontBodyBold,
-    fontSize: 14,
-    color: colors.text,
-  },
-  rankMedal: {
-    fontSize: 16,
-  },
-  rankCenter: {
-    flex: 1,
-    marginLeft: spacing.md,
-  },
-  rankName: {
-    fontFamily: typography.fontBodyMedium,
-    fontSize: 14,
-    color: colors.text,
-  },
-  rankPoints: {
-    fontFamily: typography.fontBodyBold,
-    fontSize: 14,
-    color: colors.accent,
-  },
-
-  emptyState: {
-    alignItems: 'center',
-    marginTop: spacing.xxl,
     gap: spacing.md,
+  },
+  headerText: {
+    gap: spacing.xs,
+  },
+  title: {
+    fontFamily: typography.fontDisplay,
+    fontSize: 28,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  subtitle: {
+    fontFamily: typography.fontBodyMedium,
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
+  createButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  section: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  sectionTitle: {
+    fontFamily: typography.fontDisplay,
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: spacing.md,
+  },
+  discoverHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  seeAllLink: {
+    fontFamily: typography.fontBodyMedium,
+    fontSize: 13,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    paddingVertical: spacing.lg,
+  },
+  emptyCard: {
+    backgroundColor: colors.bgElevated,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    alignItems: 'center',
+  },
+  emptyIcon: {
+    fontSize: 48,
+    marginBottom: spacing.md,
   },
   emptyTitle: {
     fontFamily: typography.fontDisplay,
-    fontSize: 20,
+    fontSize: 18,
+    fontWeight: '600',
     color: colors.text,
+    marginBottom: spacing.sm,
   },
   emptyText: {
-    fontFamily: typography.fontBody,
+    fontFamily: typography.fontBodyMedium,
     fontSize: 14,
     color: colors.textSecondary,
     textAlign: 'center',
+    marginBottom: spacing.md,
+  },
+  emptyButton: {
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  emptyButtonText: {
+    fontFamily: typography.fontDisplay,
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textInverse,
+  },
+  myLeagueCard: {
+    backgroundColor: colors.bgElevated,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  leagueCardHeader: {
+    marginBottom: spacing.md,
+  },
+  leagueCardInfo: {
+    flex: 1,
+  },
+  leagueNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  leagueName: {
+    fontFamily: typography.fontDisplay,
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  leagueMetaRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    alignItems: 'center',
+    flexWrap: 'wrap',
+  },
+  focusTypeBadge: {
+    backgroundColor: colors.primary + '20',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.sm,
+  },
+  focusTypeText: {
+    fontFamily: typography.fontBodyMedium,
+    fontSize: 11,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  prestigeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.accent + '20',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.sm,
+  },
+  prestigeText: {
+    fontFamily: typography.fontBodyMedium,
+    fontSize: 11,
+    color: colors.accent,
+    fontWeight: '600',
+  },
+  privateBadgeText: {
+    fontSize: 12,
+  },
+  leagueCardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  leagueCardMeta: {
+    fontFamily: typography.fontBodyMedium,
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
+  arrowIcon: {
+    fontFamily: typography.fontDisplay,
+    fontSize: 18,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  publicLeagueCard: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: colors.bgElevated,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  publicLeagueName: {
+    fontFamily: typography.fontDisplay,
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  publicLeagueType: {
+    fontFamily: typography.fontBodyMedium,
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: spacing.xs,
+  },
+  joinArrow: {
+    fontFamily: typography.fontDisplay,
+    fontSize: 18,
+    color: colors.primary,
+  },
+  noLeaguesText: {
+    fontFamily: typography.fontBodyMedium,
+    fontSize: 14,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    paddingVertical: spacing.md,
+  },
+  tipsCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.bgElevated,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    gap: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.primary + '40',
+  },
+  tipsContent: {
+    flex: 1,
+    gap: spacing.xs,
+  },
+  tipsTitle: {
+    fontFamily: typography.fontDisplay,
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primary,
+  },
+  tipsText: {
+    fontFamily: typography.fontBodyMedium,
+    fontSize: 13,
+    color: colors.textSecondary,
   },
 });
