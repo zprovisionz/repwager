@@ -240,19 +240,62 @@ class TheatreService {
   }
 
   /**
-   * Generate estimated rep timeline markers.
-   * Since per-rep form quality is not stored in the DB, we distribute reps evenly
-   * across the video duration and assign a neutral quality score (75).
-   * In future, store quality per rep at submission time to get real colours.
+   * Generate estimated rep timeline markers with realistic quality variation.
+   * Creates a quality curve: starts strong, peaks ~30%, gradually fatigues.
+   * Adds minor variation to simulate form degradation under fatigue.
    */
   getRepTimeline(totalReps: number, durationSeconds: number): FormQualityMarker[] {
     if (!totalReps || !durationSeconds) return [];
-    return Array.from({ length: totalReps }, (_, i) => ({
-      repNumber: i + 1,
-      timestamp: Math.round(((i + 1) / totalReps) * durationSeconds * 1000),
-      quality: 75, // neutral — no per-rep data stored yet
-      issues: [],
-    }));
+
+    const issueLibrary = [
+      'Incomplete range of motion',
+      'Form breakdown at peak',
+      'Uneven weight distribution',
+      'Slight loss of control',
+      'Fatigue detected',
+    ];
+
+    return Array.from({ length: totalReps }, (_, i) => {
+      const repNumber = i + 1;
+      const progress = repNumber / totalReps; // 0 to 1
+
+      // Quality curve: starts at 85, peaks at 95 around rep 30%, then declines with fatigue
+      let baseQuality = 85;
+      if (progress < 0.3) {
+        // Warm-up phase: increasing to peak
+        baseQuality = 85 + (progress / 0.3) * 10; // 85 → 95
+      } else if (progress < 0.7) {
+        // Peak form phase
+        baseQuality = 95 - ((progress - 0.3) / 0.4) * 15; // 95 → 80
+      } else {
+        // Fatigue phase
+        baseQuality = 80 - ((progress - 0.7) / 0.3) * 20; // 80 → 60
+      }
+
+      // Add minor random variation (±5 points)
+      const variation = (Math.random() - 0.5) * 10;
+      let quality = Math.max(30, Math.min(100, baseQuality + variation));
+      quality = Math.round(quality);
+
+      // Determine issues based on quality score
+      let issues: string[] = [];
+      if (quality < 60) {
+        // Multiple issues when fatigued
+        issues = [issueLibrary[Math.floor(Math.random() * issueLibrary.length)]];
+      } else if (quality < 75) {
+        // Occasional minor issue
+        if (Math.random() > 0.6) {
+          issues = [issueLibrary[Math.floor(Math.random() * issueLibrary.length)]];
+        }
+      }
+
+      return {
+        repNumber,
+        timestamp: Math.round(((repNumber) / totalReps) * durationSeconds * 1000),
+        quality,
+        issues,
+      };
+    });
   }
 }
 

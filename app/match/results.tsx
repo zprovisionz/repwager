@@ -6,7 +6,8 @@ import { colors, typography, spacing, radius } from '@/lib/theme';
 import { useAuthStore } from '@/stores/authStore';
 import { useMatchStore } from '@/stores/matchStore';
 import { useToastStore } from '@/stores/toastStore';
-import { Trophy, Frown, Zap, AlertTriangle } from 'lucide-react-native';
+import { Trophy, Frown, Zap, AlertTriangle, Play } from 'lucide-react-native';
+import { theatreService } from '@/services/theatre.service';
 import Button from '@/components/ui/Button';
 import { LevelUpAnimation } from '@/components/LevelUpAnimation';
 import { checkAndAwardBadges } from '@/services/badge.service';
@@ -65,6 +66,7 @@ export default function ResultsScreen() {
   const [disputeVisible, setDisputeVisible] = useState(false);
   const [disputeReason, setDisputeReason] = useState('');
   const [disputeLoading, setDisputeLoading] = useState(false);
+  const [isFirstMatch, setIsFirstMatch] = useState(false);
 
   const won = isWinner === 'true';
   const reps = parseInt(myReps ?? '0');
@@ -86,6 +88,13 @@ export default function ResultsScreen() {
 
     if (session?.user && profile) {
       const prevLevel = calculateLevel(profile.total_xp ?? 0);
+
+      // Check if this is the first completed match
+      theatreService.getCompletedMatches(session.user.id).then((matches) => {
+        setIsFirstMatch(matches.length === 1);
+      }).catch(() => {
+        setIsFirstMatch(false);
+      });
 
       checkAndAwardBadges(session.user.id, profile, reps).then((badges) => {
         badges.forEach((b) => {
@@ -211,6 +220,25 @@ export default function ResultsScreen() {
           </View>
         )}
 
+        {/* First match nudge */}
+        {isFirstMatch && (
+          <View style={styles.nudgeCard}>
+            <View style={styles.nudgeHeader}>
+              <Play size={20} color={colors.primary} fill={colors.primary} />
+              <Text style={styles.nudgeTitle}>Review Your Match</Text>
+            </View>
+            <Text style={styles.nudgeBody}>
+              Watch your form breakdown in detail. See reps highlighted, form feedback, and compare your performance side-by-side!
+            </Text>
+            <TouchableOpacity
+              style={styles.nudgeLink}
+              onPress={() => router.replace({ pathname: '/theatre/[id]', params: { id: matchId! } })}
+            >
+              <Text style={styles.nudgeLinkText}>Open Theatre →</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         <View style={styles.statsCard}>
           <View style={styles.statRow}>
             <Zap size={18} color={colors.primary} />
@@ -235,7 +263,7 @@ export default function ResultsScreen() {
             style={styles.actionBtn}
           />
           <Button
-            label="View Match"
+            label="View Replay"
             onPress={() => router.replace({ pathname: '/theatre/[id]', params: { id: matchId! } })}
             variant="outline"
             size="lg"
@@ -438,5 +466,41 @@ const styles = StyleSheet.create({
   },
   btnDisabled: {
     opacity: 0.4,
+  },
+  nudgeCard: {
+    width: '100%',
+    backgroundColor: colors.primary + '12',
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.primary + '40',
+    gap: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  nudgeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  nudgeTitle: {
+    fontFamily: typography.fontBodyBold,
+    fontSize: 15,
+    color: colors.primary,
+  },
+  nudgeBody: {
+    fontFamily: typography.fontBody,
+    fontSize: 13,
+    color: colors.textSecondary,
+    lineHeight: 18,
+  },
+  nudgeLink: {
+    alignSelf: 'flex-start',
+    paddingVertical: spacing.xs,
+  },
+  nudgeLinkText: {
+    fontFamily: typography.fontBodyBold,
+    fontSize: 13,
+    color: colors.primary,
+    textDecorationLine: 'underline',
   },
 });

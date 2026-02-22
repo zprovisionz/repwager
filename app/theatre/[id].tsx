@@ -34,6 +34,8 @@ import Avatar from '@/components/Avatar';
 import Button from '@/components/ui/Button';
 import VideoPlayer from '@/components/VideoPlayer';
 import RepTimeline from '@/components/RepTimeline';
+import RepComparisonGraph from '@/components/RepComparisonGraph';
+import ShareClipPreview from '@/components/ShareClipPreview';
 import type { Match, Profile } from '@/types/database';
 import type { TheatreMatch, FormQualityMarker } from '@/types/theatre';
 import { EXERCISE_LABELS } from '@/lib/config';
@@ -310,17 +312,25 @@ export default function TheatreDetailScreen() {
 
         {/* Tab content */}
         {bottomTab === 'stats' && theatreMatch && (
-          <View style={styles.detailsCard}>
-            <DetailRow icon={<Zap size={15} color={colors.primary} />} label="Exercise" value={EXERCISE_LABELS[theatreMatch.exerciseType]} />
-            <DetailRow icon={<Clock size={15} color={colors.textSecondary} />} label="Duration" value={`${duration}s`} />
-            {!!theatreMatch.wagerAmount && (
-              <DetailRow icon={<DollarSign size={15} color={colors.accent} />} label="Wager" value={`$${theatreMatch.wagerAmount.toFixed(2)}`} />
-            )}
-            <DetailRow
-              icon={<Trophy size={15} color={colors.textSecondary} />}
-              label="Mode"
-              value={theatreMatch.mode === 'competitive' ? 'Competitive' : 'Casual'}
+          <View style={{ gap: spacing.md }}>
+            <RepComparisonGraph
+              selfReps={myReps}
+              opponentReps={opponentReps}
+              selfName="You"
+              opponentName={theatreMatch.opponentName}
             />
+            <View style={styles.detailsCard}>
+              <DetailRow icon={<Zap size={15} color={colors.primary} />} label="Exercise" value={EXERCISE_LABELS[theatreMatch.exerciseType]} />
+              <DetailRow icon={<Clock size={15} color={colors.textSecondary} />} label="Duration" value={`${duration}s`} />
+              {!!theatreMatch.wagerAmount && (
+                <DetailRow icon={<DollarSign size={15} color={colors.accent} />} label="Wager" value={`$${theatreMatch.wagerAmount.toFixed(2)}`} />
+              )}
+              <DetailRow
+                icon={<Trophy size={15} color={colors.textSecondary} />}
+                label="Mode"
+                value={theatreMatch.mode === 'competitive' ? 'Competitive' : 'Casual'}
+              />
+            </View>
           </View>
         )}
 
@@ -347,14 +357,14 @@ export default function TheatreDetailScreen() {
           </View>
         )}
 
-        {bottomTab === 'share' && (
-          <View style={styles.comingSoonCard}>
-            <Share2 size={32} color={colors.textMuted} />
-            <Text style={styles.comingSoonTitle}>Share Anonymized Clip</Text>
-            <Text style={styles.comingSoonBody}>
-              Clip export is coming in a future update. You'll be able to share a masked highlight of your best reps.
-            </Text>
-          </View>
+        {bottomTab === 'share' && theatreMatch && (
+          <ShareClipPreview
+            matchId={id!}
+            exerciseType={EXERCISE_LABELS[theatreMatch.exerciseType]}
+            opponentName={theatreMatch.opponentName}
+            myReps={myReps}
+            opponentReps={opponentReps}
+          />
         )}
 
         {bottomTab === 'rematch' && theatreMatch && (
@@ -578,19 +588,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-
-  // Share coming soon
-  comingSoonCard: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radius.lg,
-    padding: spacing.xl,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    gap: spacing.md,
-  },
-  comingSoonTitle: { fontFamily: typography.fontBodyBold, fontSize: 16, color: colors.text },
-  comingSoonBody: { fontFamily: typography.fontBody, fontSize: 14, color: colors.textMuted, textAlign: 'center' },
 
   // Rematch
   rematchCard: {
