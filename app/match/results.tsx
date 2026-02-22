@@ -6,13 +6,14 @@ import { colors, typography, spacing, radius } from '@/lib/theme';
 import { useAuthStore } from '@/stores/authStore';
 import { useMatchStore } from '@/stores/matchStore';
 import { useToastStore } from '@/stores/toastStore';
-import { Trophy, Frown, Zap, AlertTriangle, Play, Clock } from 'lucide-react-native';
+import { Trophy, Frown, Zap, AlertTriangle, Play, Clock, Shield } from 'lucide-react-native';
 import { theatreService } from '@/services/theatre.service';
 import Button from '@/components/ui/Button';
 import { LevelUpAnimation } from '@/components/LevelUpAnimation';
 import { checkAndAwardBadges } from '@/services/badge.service';
 import { getMatch, fileDispute } from '@/services/match.service';
 import { getOpponentData, hasUserSubmitted, hasOpponentSubmitted } from '@/services/asyncMatch.service';
+import { incrementStreak, decrementStreak, updateLastActiveDate, getStreakStatus } from '@/services/streak.service';
 import { calculateLevel } from '@/lib/levelSystem';
 import type { Match } from '@/types/database';
 import type { Level } from '@/lib/levelSystem';
@@ -102,6 +103,44 @@ export default function ResultsScreen() {
           showToast({ type: 'badge', title: 'Badge Earned!', message: b.replace(/_/g, ' ') });
         });
       });
+
+      // Update streak based on match result
+      (async () => {
+        try {
+          // Update last active date
+          await updateLastActiveDate(session.user.id);
+
+          if (won) {
+            // Win: increment streak
+            const { newStreak, freezeGranted } = await incrementStreak(session.user.id);
+            if (freezeGranted) {
+              showToast({
+                type: 'success',
+                title: '🛡️ Streak Freeze Unlocked!',
+                message: `Reached ${newStreak}-day streak! Protect your next loss.`,
+              });
+            }
+          } else {
+            // Loss: check for freeze
+            const { freezeConsumed, newStreak } = await decrementStreak(session.user.id);
+            if (freezeConsumed) {
+              showToast({
+                type: 'success',
+                title: '🛡️ Streak Freeze Used!',
+                message: `Your streak is protected. You still have ${newStreak} days!`,
+              });
+            } else {
+              showToast({
+                type: 'warning',
+                title: '🔥 Streak Reset',
+                message: 'Your streak is gone. Build a new one!',
+              });
+            }
+          }
+        } catch (err) {
+          console.warn('[results] Streak update failed:', err);
+        }
+      })();
 
       refreshProfile().then(() => {
         const updatedProfile = useAuthStore.getState().profile;

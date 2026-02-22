@@ -7,12 +7,13 @@ import { useAuthStore } from '@/stores/authStore';
 import { colors, typography, spacing, radius } from '@/lib/theme';
 import { getUserMatches, getOpenChallenges, acceptMatch, getHotMatches } from '@/services/match.service';
 import { getUserLeaderboardRank, markOnboardingShown } from '@/services/profile.service';
+import { getStreakStatus } from '@/services/streak.service';
 import { useToastStore } from '@/stores/toastStore';
 import MatchCard from '@/components/MatchCard';
 import Avatar from '@/components/Avatar';
 import OnboardingModal from '@/components/OnboardingModal';
 import QuickPracticeModal from '@/components/QuickPracticeModal';
-import { Plus, Zap, DollarSign, Flame, Target, Trophy, Dumbbell, TrendingUp, ChevronRight, Bell } from 'lucide-react-native';
+import { Plus, Zap, DollarSign, Flame, Target, Trophy, Dumbbell, TrendingUp, ChevronRight, Bell, Shield } from 'lucide-react-native';
 import type { Match } from '@/types/database';
 
 const COMPETITIVE_UNLOCK_THRESHOLD = 10;
@@ -27,6 +28,12 @@ export default function HomeScreen() {
   const [openChallenges, setOpenChallenges] = useState<any[]>([]);
   const [hotMatches, setHotMatches] = useState<any[]>([]);
   const [myRank, setMyRank] = useState<number | null>(null);
+  const [streakStatus, setStreakStatus] = useState<{
+    currentStreak: number;
+    longestStreak: number;
+    freezeAvailable: boolean;
+    freezeUsedAt: string | null;
+  } | null>(null);
   const [tab, setTab] = useState<'open' | 'mine'>('open');
   const [refreshing, setRefreshing] = useState(false);
   const [accepting, setAccepting] = useState<string | null>(null);
@@ -36,16 +43,18 @@ export default function HomeScreen() {
   async function load() {
     if (!session?.user) return;
     try {
-      const [mine, open, hot, rank] = await Promise.all([
+      const [mine, open, hot, rank, streak] = await Promise.all([
         getUserMatches(session.user.id),
         getOpenChallenges(),
         getHotMatches(6),
         getUserLeaderboardRank(session.user.id),
+        getStreakStatus(session.user.id),
       ]);
       setMyMatches(mine);
       setOpenChallenges(open.filter((m: any) => m.challenger_id !== session.user.id));
       setHotMatches(hot.filter((m: any) => m.challenger_id !== session.user.id));
       setMyRank(rank);
+      setStreakStatus(streak);
     } catch {}
   }
 
@@ -154,7 +163,12 @@ export default function HomeScreen() {
               <View style={styles.statDivider} />
               <View style={styles.statBlock}>
                 <Flame size={16} color={colors.secondary} />
-                <Text style={styles.statValue}>{profile?.current_streak ?? 0}</Text>
+                <View style={styles.streakValueRow}>
+                  <Text style={styles.statValue}>{profile?.current_streak ?? 0}</Text>
+                  {streakStatus?.freezeAvailable && (
+                    <Shield size={14} color={colors.success} style={styles.freezeIcon} />
+                  )}
+                </View>
                 <Text style={styles.statLabel}>Streak</Text>
               </View>
             </View>
@@ -418,6 +432,14 @@ const styles = StyleSheet.create({
     fontFamily: typography.fontBody,
     fontSize: 11,
     color: colors.textMuted,
+  },
+  streakValueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  freezeIcon: {
+    marginLeft: 2,
   },
   rankBanner: {
     flexDirection: 'row',
