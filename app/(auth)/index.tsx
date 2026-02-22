@@ -136,7 +136,7 @@ const styles = StyleSheet.create({
     color: colors.primary,
     textAlign: 'center',
     lineHeight: 72,
-    letterSpacing: 8,
+    letterSpacing: 4,
     textShadowColor: colors.primary,
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 20,
