@@ -1,10 +1,12 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Animated, TouchableOpacity, Dimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, typography, spacing, radius } from '@/lib/theme';
 import { Zap, Trophy, DollarSign } from 'lucide-react-native';
+import LegalDisclaimerModal from '@/components/LegalDisclaimerModal';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
 
@@ -20,11 +22,38 @@ function FeaturePill({ icon, label }: { icon: React.ReactNode; label: string }) 
 export default function WelcomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const [showLegalDisclaimer, setShowLegalDisclaimer] = useState(false);
   const titleAnim = useRef(new Animated.Value(0)).current;
   const subtitleAnim = useRef(new Animated.Value(0)).current;
   const pillsAnim = useRef(new Animated.Value(0)).current;
   const btnsAnim = useRef(new Animated.Value(0)).current;
   const glowAnim = useRef(new Animated.Value(0.4)).current;
+
+  useEffect(() => {
+    // Check if user has already accepted legal disclaimer
+    checkLegalDisclaimerStatus();
+  }, []);
+
+  const checkLegalDisclaimerStatus = async () => {
+    try {
+      const accepted = await AsyncStorage.getItem('legal_disclaimer_accepted');
+      if (!accepted) {
+        setShowLegalDisclaimer(true);
+      }
+    } catch (error) {
+      console.error('Failed to check legal disclaimer status:', error);
+      setShowLegalDisclaimer(true);
+    }
+  };
+
+  const handleLegalAccept = async () => {
+    try {
+      await AsyncStorage.setItem('legal_disclaimer_accepted', 'true');
+      setShowLegalDisclaimer(false);
+    } catch (error) {
+      console.error('Failed to save legal disclaimer acceptance:', error);
+    }
+  };
 
   useEffect(() => {
     Animated.loop(
@@ -43,7 +72,12 @@ export default function WelcomeScreen() {
   }, []);
 
   return (
-    <View style={styles.container}>
+    <>
+      <LegalDisclaimerModal
+        visible={showLegalDisclaimer}
+        onAccept={handleLegalAccept}
+      />
+      <View style={styles.container}>
       <LinearGradient
         colors={['#00D4FF22', '#080C14', '#FF2D7811']}
         style={StyleSheet.absoluteFill}
@@ -99,7 +133,8 @@ export default function WelcomeScreen() {
           </TouchableOpacity>
         </Animated.View>
       </View>
-    </View>
+      </View>
+    </>
   );
 }
 
