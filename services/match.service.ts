@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase';
 import { notifyOpponentSubmitted, notifyNewChallenge } from '@/services/notification.service';
 import { getTimeUntilDeadline, formatDeadlineTime } from '@/services/asyncMatch.service';
 import { autoEnrollUserInDefaultLeague, updateLeaguePoints, getOrCreateDefaultLeague } from '@/services/league.service';
+import { DEV_MODE_ENABLED } from '@/lib/config';
 import type { Match } from '@/types/database';
 
 export async function createMatch(challengerId: string, exerciseType: 'push_ups' | 'squats', wagerAmount: number, opponentId?: string, mode: 'competitive' | 'casual' = 'competitive'): Promise<Match> {
@@ -210,11 +211,13 @@ export async function updateMatchLeagueStats(
       const { awardLeagueXp } = await import('@/services/leagueTournament.service');
       await awardLeagueXp(userId, league.id, 50); // 50 XP per win
 
-      console.log('[League Integration] Awarded points + XP for match', {
-        userId,
-        leagueId: league.id,
-        xp: 50,
-      });
+      if (DEV_MODE_ENABLED) {
+        console.log('[League Integration] Awarded points + XP for match', {
+          userId,
+          leagueId: league.id,
+          xp: 50,
+        });
+      }
     }
   } catch (err) {
     console.warn('[match.service] updateMatchLeagueStats error:', err);

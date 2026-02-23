@@ -1,4 +1,4 @@
-import { REP_DEBOUNCE_MS, FORM_QUALITY_MIN_THRESHOLD } from '@/lib/config';
+import { REP_DEBOUNCE_MS, FORM_QUALITY_MIN_THRESHOLD, DEV_MODE_ENABLED } from '@/lib/config';
 
 export interface RepQualityScore {
   formQuality: number; // 0-100
@@ -16,10 +16,10 @@ export class RepThrottle {
     const elapsed = now - this.lastRepTime;
     if (elapsed >= REP_DEBOUNCE_MS) {
       this.lastRepTime = now;
-      console.log('[RepThrottle] canCount: true — elapsed:', elapsed, 'ms');
+      if (DEV_MODE_ENABLED) console.log('[RepThrottle] canCount: true — elapsed:', elapsed, 'ms');
       return true;
     }
-    console.log('[RepThrottle] canCount: false — throttled, only', elapsed, 'ms since last rep (need', REP_DEBOUNCE_MS, 'ms)');
+    if (DEV_MODE_ENABLED) console.log('[RepThrottle] canCount: false — throttled, only', elapsed, 'ms since last rep (need', REP_DEBOUNCE_MS, 'ms)');
     return false;
   }
 
@@ -33,7 +33,7 @@ export class RepThrottle {
 
     if (!isAcceptable) {
       this.consecutiveLowQualityReps++;
-      console.log('[RepThrottle] Low form quality:', quality, '% — consecutive low-quality reps:', this.consecutiveLowQualityReps);
+      if (DEV_MODE_ENABLED) console.log('[RepThrottle] Low form quality:', quality, '% — consecutive low-quality reps:', this.consecutiveLowQualityReps);
     } else {
       this.consecutiveLowQualityReps = 0;
     }
