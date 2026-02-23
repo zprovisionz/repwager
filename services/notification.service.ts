@@ -164,6 +164,28 @@ export async function notifyStreakReminder(
 }
 
 /**
+ * Encourage user when their streak breaks - motivational comeback message
+ */
+export async function notifyStreakLost(
+  userId: string,
+  previousStreak: number
+): Promise<void> {
+  const messages = [
+    `That was a ${previousStreak}-day streak! Build it back faster. Every rep counts! 💪`,
+    `${previousStreak} days strong! Don't sweat the loss—streaks are meant to be rebuilt. You got this! 🚀`,
+    `Broke your ${previousStreak}-day streak! The comeback is always stronger than the setback. Let's go! 🔥`,
+    `That ${previousStreak}-day run was epic! New streak starts today. Make it count! ⚡`,
+  ];
+  const randomMsg = messages[Math.floor(Math.random() * messages.length)];
+
+  await sendNotificationToPush(userId, 'streak_reminder', `💔 Streak Lost`, randomMsg, {
+    streak: previousStreak,
+    action: 'play_match',
+    streakLost: true,
+  });
+}
+
+/**
  * Nudge inactive user to return and play
  */
 export async function notifyInactivity(

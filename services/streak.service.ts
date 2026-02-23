@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { notifyStreakReminder } from '@/services/notification.service';
+import { notifyStreakReminder, notifyStreakLost } from '@/services/notification.service';
 import type { Profile } from '@/types/database';
 
 // ─── STREAK CONSTANTS ──────────────────────────────────────────────────────
@@ -56,7 +56,7 @@ export async function incrementStreak(userId: string): Promise<{
 /**
  * Decrement user streak (after a loss)
  * If user has freeze available, consume it and preserve streak
- * Otherwise, reset streak to 0
+ * Otherwise, reset streak to 0 and notify user
  */
 export async function decrementStreak(userId: string): Promise<{
   freezeConsumed: boolean;
@@ -72,6 +72,7 @@ export async function decrementStreak(userId: string): Promise<{
     if (getErr || !profile) throw getErr || new Error('Profile not found');
 
     const hasFreeze = profile.streak_freeze_available === true;
+    const previousStreak = profile.current_streak ?? 0;
     const updates: any = {
       last_active_date: new Date().toISOString(),
     };
@@ -84,7 +85,7 @@ export async function decrementStreak(userId: string): Promise<{
       updates.streak_freeze_used_at = new Date().toISOString();
       freezeConsumed = true;
     } else {
-      // No freeze — reset streak to 0
+      // No freeze — reset streak to 0 and notify user
       updates.current_streak = 0;
     }
 
@@ -93,6 +94,16 @@ export async function decrementStreak(userId: string): Promise<{
       .eq('id', userId);
 
     if (updateErr) throw updateErr;
+
+    // Send encouraging notification if streak was actually broken (not frozen)
+    if (!freezeConsumed && previousStreak > 0) {
+      try {
+        await notifyStreakLost(userId, previousStreak);
+      } catch (notifyErr) {
+        console.warn('[streak.service] Failed to send streak lost notification:', notifyErr);
+        // Don't throw — notification is non-critical
+      }
+    }
 
     return {
       freezeConsumed,
