@@ -3,6 +3,7 @@ import type { Session } from '@supabase/supabase-js';
 import type { Profile } from '@/types/database';
 import { supabase } from '@/lib/supabase';
 import { getProfile } from '@/services/profile.service';
+import { DEV_MODE_ENABLED } from '@/lib/config';
 
 interface AuthState {
   session: Session | null;
@@ -30,7 +31,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const profile = await getProfile(session.user.id);
       set({ profile });
-    } catch {}
+    } catch (error) {
+      if (DEV_MODE_ENABLED) console.error('[AuthStore] Failed to refresh profile:', error);
+    }
   },
 
   reset: () => set({ session: null, profile: null, isLoading: false }),

@@ -11,6 +11,7 @@ import {
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '@/stores/authStore';
+import { useToastStore } from '@/stores/toastStore';
 import { theatreService, type TheatreFilter } from '@/services/theatre.service';
 import { colors, typography, spacing, radius } from '@/lib/theme';
 import Avatar from '@/components/Avatar';
@@ -126,6 +127,7 @@ export default function TheatreScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { session } = useAuthStore();
+  const { show: showToast } = useToastStore();
 
   const [filter, setFilter] = useState<TheatreFilter>('all');
   const [matches, setMatches] = useState<TheatreMatch[]>([]);
@@ -137,7 +139,10 @@ export default function TheatreScreen() {
     try {
       const data = await theatreService.getCompletedMatches(session.user.id, filter);
       setMatches(data);
-    } catch {}
+    } catch (error) {
+      console.error('[TheatreScreen] Failed to load matches:', error);
+      showToast({ type: 'error', title: 'Failed to load matches' });
+    }
     finally {
       setLoading(false);
       setRefreshing(false);

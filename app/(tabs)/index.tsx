@@ -55,7 +55,10 @@ export default function HomeScreen() {
       setHotMatches(hot.filter((m: any) => m.challenger_id !== session.user.id));
       setMyRank(rank);
       setStreakStatus(streak);
-    } catch {}
+    } catch (error) {
+      console.error('[HomeScreen] Failed to load matches:', error);
+      showToast({ type: 'error', title: 'Failed to load matches' });
+    }
   }
 
   useEffect(() => { load(); }, []);

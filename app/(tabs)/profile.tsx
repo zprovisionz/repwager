@@ -40,7 +40,10 @@ export default function ProfileScreen() {
       ]);
       setBadges(b);
       setTransactions(t);
-    } catch {}
+    } catch (error) {
+      console.error('[ProfileScreen] Failed to load badges/transactions:', error);
+      showToast({ type: 'error', title: 'Failed to load data' });
+    }
   }
 
   useEffect(() => { load(); }, []);
