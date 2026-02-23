@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Platform, Alert, Linking } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -236,15 +236,61 @@ export default function MatchScreen() {
   const formatDeadline = (seconds: number) => formatDeadlineTime(seconds);
 
   // Camera permission check
-  if (!permission) return <View style={styles.fill} />;
-
-  if (!permission.granted) {
+  if (!permission) {
     return (
       <View style={[styles.fill, styles.center]}>
-        <Text style={styles.permText}>Camera access is needed to count reps.</Text>
-        <TouchableOpacity style={styles.permBtn} onPress={requestPermission}>
-          <Text style={styles.permBtnText}>Allow Camera</Text>
-        </TouchableOpacity>
+        <Text style={styles.permText}>Loading camera...</Text>
+      </View>
+    );
+  }
+
+  if (!permission.granted) {
+    const handleRequestPermission = async () => {
+      const result = await requestPermission();
+      if (!result.granted) {
+        Alert.alert(
+          'Camera Permission Required',
+          'RepWager needs camera access to count your reps during matches. Without it, you\'ll need to manually tap the screen to count each rep.',
+          [
+            {
+              text: 'Go to Settings',
+              onPress: () => {
+                if (Platform.OS === 'ios') {
+                  Linking.openURL('app-settings://');
+                } else {
+                  Linking.openSettings();
+                }
+              },
+            },
+            { text: 'Continue Without Camera', style: 'cancel' },
+          ]
+        );
+      }
+    };
+
+    return (
+      <View style={[styles.fill, styles.center, styles.permissionContainer]}>
+        <View style={styles.permissionCard}>
+          <Text style={styles.permissionIcon}>📷</Text>
+          <Text style={styles.permissionTitle}>Camera Access Required</Text>
+          <Text style={styles.permissionDescription}>
+            We need camera access to use AI-powered form detection to count your reps automatically. Without it, you can still compete using manual counting.
+          </Text>
+
+          <View style={styles.permissionBenefits}>
+            <Text style={styles.benefitItem}>✓ Auto-count reps with AI form detection</Text>
+            <Text style={styles.benefitItem}>✓ Real-time form quality feedback</Text>
+            <Text style={styles.benefitItem}>✓ Prevent form cheating</Text>
+          </View>
+
+          <TouchableOpacity style={styles.permBtn} onPress={handleRequestPermission}>
+            <Text style={styles.permBtnText}>Allow Camera</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.permSkipBtn} onPress={() => setPhase('pre_record')}>
+            <Text style={styles.permSkipBtnText}>Use Manual Counting</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
@@ -848,6 +894,53 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.text,
   },
+  permissionContainer: {
+    backgroundColor: colors.bg,
+  },
+  permissionCard: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    width: '85%',
+    maxWidth: 360,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  permissionIcon: {
+    fontSize: 56,
+    marginBottom: spacing.md,
+  },
+  permissionTitle: {
+    fontFamily: typography.fontDisplay,
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: spacing.sm,
+    textAlign: 'center',
+  },
+  permissionDescription: {
+    fontFamily: typography.fontBody,
+    fontSize: 14,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: spacing.lg,
+    lineHeight: 20,
+  },
+  permissionBenefits: {
+    backgroundColor: colors.bg,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    marginBottom: spacing.lg,
+    width: '100%',
+    gap: spacing.sm,
+  },
+  benefitItem: {
+    fontFamily: typography.fontBody,
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
   permText: {
     fontFamily: typography.fontBody,
     fontSize: 16,
@@ -859,13 +952,29 @@ const styles = StyleSheet.create({
   permBtn: {
     backgroundColor: colors.primary,
     borderRadius: radius.md,
-    paddingVertical: spacing.sm + 4,
+    paddingVertical: spacing.md,
     paddingHorizontal: spacing.xl,
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
   },
   permBtnText: {
-    fontFamily: typography.fontBodyBold,
+    fontFamily: typography.fontDisplay,
     fontSize: 15,
+    fontWeight: '600',
     color: colors.textInverse,
+    letterSpacing: 0.5,
+  },
+  permSkipBtn: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    width: '100%',
+    alignItems: 'center',
+  },
+  permSkipBtnText: {
+    fontFamily: typography.fontBody,
+    fontSize: 14,
+    color: colors.primary,
   },
   errorBanner: {
     position: 'absolute',
