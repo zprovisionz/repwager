@@ -24,7 +24,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { colors, typography, spacing, radius } from '@/lib/theme';
 import { createLeague } from '@/services/leagueTournament.service';
 import { uploadLeaguePhoto } from '@/lib/storage';
-import { useAuth } from '@/store/auth';
+import { useAuthStore } from '@/stores/authStore';
 import { Shield, Users, Trophy, Image as ImageIcon } from 'lucide-react-native';
 
 type FocusType = 'casual' | 'fitness' | 'competitive';
@@ -38,7 +38,8 @@ const FOCUS_TYPES: { id: FocusType; label: string; desc: string }[] = [
 
 export default function CreateLeagueScreen() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { session } = useAuthStore();
+  const user = session?.user;
 
   const [name, setName] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);

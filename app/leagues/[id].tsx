@@ -35,14 +35,15 @@ import {
   type LeagueChat,
   type LeagueMatch,
 } from '@/services/leagueTournament.service';
-import { useAuth } from '@/store/auth';
+import { useAuthStore } from '@/stores/authStore';
 import { Trophy, Users, MessageCircle, Swords, Settings } from 'lucide-react-native';
 
 export default function LeagueDetailScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { session } = useAuthStore();
+  const user = session?.user;
 
   const [league, setLeague] = useState<League | null>(null);
   const [members, setMembers] = useState<LeagueMember[]>([]);
