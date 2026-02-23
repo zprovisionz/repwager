@@ -442,57 +442,49 @@ CREATE INDEX IF NOT EXISTS idx_playoff_matches_status       ON playoff_matches(l
 -- ============================================================================
 -- 5. ROW LEVEL SECURITY POLICIES
 -- ============================================================================
--- Uses DO blocks with EXCEPTION to be idempotent (safe to re-run)
+-- Uses DROP POLICY IF EXISTS to be idempotent (safe to re-run)
 
 -- ─── profiles ────────────────────────────────────────────────────────────────
-DO $$ BEGIN
-  CREATE POLICY "Users can read own profile"
+DROP POLICY IF EXISTS "Users can read own profile" ON profiles;
+CREATE POLICY "Users can read own profile"
     ON profiles FOR SELECT TO authenticated USING (auth.uid() = id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-DO $$ BEGIN
-  CREATE POLICY "Users can read other profiles for match display"
+DROP POLICY IF EXISTS "Users can read other profiles for match display" ON profiles;
+CREATE POLICY "Users can read other profiles for match display"
     ON profiles FOR SELECT TO authenticated USING (true);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-DO $$ BEGIN
-  CREATE POLICY "Users can insert own profile"
+DROP POLICY IF EXISTS "Users can insert own profile" ON profiles;
+CREATE POLICY "Users can insert own profile"
     ON profiles FOR INSERT TO authenticated WITH CHECK (auth.uid() = id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-DO $$ BEGIN
-  CREATE POLICY "Users can update own profile"
+DROP POLICY IF EXISTS "Users can update own profile" ON profiles;
+CREATE POLICY "Users can update own profile"
     ON profiles FOR UPDATE TO authenticated
     USING (auth.uid() = id) WITH CHECK (auth.uid() = id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ─── matches ─────────────────────────────────────────────────────────────────
-DO $$ BEGIN
-  CREATE POLICY "Participants can read their matches"
+DROP POLICY IF EXISTS "Participants can read their matches" ON matches;
+CREATE POLICY "Participants can read their matches"
     ON matches FOR SELECT TO authenticated
     USING (auth.uid() = challenger_id OR auth.uid() = opponent_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-DO $$ BEGIN
-  CREATE POLICY "Authenticated users can see pending matches"
+DROP POLICY IF EXISTS "Authenticated users can see pending matches" ON matches;
+CREATE POLICY "Authenticated users can see pending matches"
     ON matches FOR SELECT TO authenticated USING (status = 'pending');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-DO $$ BEGIN
-  CREATE POLICY "Challenger can create match"
+DROP POLICY IF EXISTS "Challenger can create match" ON matches;
+CREATE POLICY "Challenger can create match"
     ON matches FOR INSERT TO authenticated WITH CHECK (auth.uid() = challenger_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-DO $$ BEGIN
-  CREATE POLICY "Participants can update their matches"
+DROP POLICY IF EXISTS "Participants can update their matches" ON matches;
+CREATE POLICY "Participants can update their matches"
     ON matches FOR UPDATE TO authenticated
     USING (auth.uid() = challenger_id OR auth.uid() = opponent_id)
     WITH CHECK (auth.uid() = challenger_id OR auth.uid() = opponent_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ─── match_videos ────────────────────────────────────────────────────────────
-DO $$ BEGIN
-  CREATE POLICY "Match participants can view videos"
+DROP POLICY IF EXISTS "Match participants can view videos" ON match_videos;
+CREATE POLICY "Match participants can view videos"
     ON match_videos FOR SELECT TO authenticated
     USING (
       EXISTS (
@@ -501,150 +493,126 @@ DO $$ BEGIN
         AND (matches.challenger_id = auth.uid() OR matches.opponent_id = auth.uid())
       )
     );
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-DO $$ BEGIN
-  CREATE POLICY "Users can insert own video"
+DROP POLICY IF EXISTS "Users can insert own video" ON match_videos;
+CREATE POLICY "Users can insert own video"
     ON match_videos FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ─── transactions ────────────────────────────────────────────────────────────
-DO $$ BEGIN
-  CREATE POLICY "Users can read own transactions"
+DROP POLICY IF EXISTS "Users can read own transactions" ON transactions;
+CREATE POLICY "Users can read own transactions"
     ON transactions FOR SELECT TO authenticated USING (auth.uid() = user_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ─── badges ──────────────────────────────────────────────────────────────────
-DO $$ BEGIN
-  CREATE POLICY "Anyone can read badges"
+DROP POLICY IF EXISTS "Anyone can read badges" ON badges;
+CREATE POLICY "Anyone can read badges"
     ON badges FOR SELECT TO authenticated USING (true);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ─── user_badges ─────────────────────────────────────────────────────────────
-DO $$ BEGIN
-  CREATE POLICY "Users can read own badges"
+DROP POLICY IF EXISTS "Users can read own badges" ON user_badges;
+CREATE POLICY "Users can read own badges"
     ON user_badges FOR SELECT TO authenticated USING (auth.uid() = user_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-DO $$ BEGIN
-  CREATE POLICY "Users can read others badges"
+DROP POLICY IF EXISTS "Users can read others badges" ON user_badges;
+CREATE POLICY "Users can read others badges"
     ON user_badges FOR SELECT TO authenticated USING (true);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ─── notifications ───────────────────────────────────────────────────────────
-DO $$ BEGIN
-  CREATE POLICY "Users can read own notifications"
+DROP POLICY IF EXISTS "Users can read own notifications" ON notifications;
+CREATE POLICY "Users can read own notifications"
     ON notifications FOR SELECT TO authenticated USING (auth.uid() = user_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-DO $$ BEGIN
-  CREATE POLICY "Users can update own notifications"
+DROP POLICY IF EXISTS "Users can update own notifications" ON notifications;
+CREATE POLICY "Users can update own notifications"
     ON notifications FOR UPDATE TO authenticated
     USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ─── push_tokens ─────────────────────────────────────────────────────────────
-DO $$ BEGIN
-  CREATE POLICY "Users can view own push tokens"
+DROP POLICY IF EXISTS "Users can view own push tokens" ON push_tokens;
+CREATE POLICY "Users can view own push tokens"
     ON push_tokens FOR SELECT TO authenticated USING (auth.uid() = user_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-DO $$ BEGIN
-  CREATE POLICY "Users can insert own push tokens"
+DROP POLICY IF EXISTS "Users can insert own push tokens" ON push_tokens;
+CREATE POLICY "Users can insert own push tokens"
     ON push_tokens FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-DO $$ BEGIN
-  CREATE POLICY "Users can delete own push tokens"
+DROP POLICY IF EXISTS "Users can delete own push tokens" ON push_tokens;
+CREATE POLICY "Users can delete own push tokens"
     ON push_tokens FOR DELETE TO authenticated USING (auth.uid() = user_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ─── practice_sessions ───────────────────────────────────────────────────────
-DO $$ BEGIN
-  CREATE POLICY "Users can read own practice sessions"
+DROP POLICY IF EXISTS "Users can read own practice sessions" ON practice_sessions;
+CREATE POLICY "Users can read own practice sessions"
     ON practice_sessions FOR SELECT TO authenticated USING (auth.uid() = user_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-DO $$ BEGIN
-  CREATE POLICY "Users can insert own practice sessions"
+DROP POLICY IF EXISTS "Users can insert own practice sessions" ON practice_sessions;
+CREATE POLICY "Users can insert own practice sessions"
     ON practice_sessions FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-DO $$ BEGIN
-  CREATE POLICY "Users can update own practice sessions"
+DROP POLICY IF EXISTS "Users can update own practice sessions" ON practice_sessions;
+CREATE POLICY "Users can update own practice sessions"
     ON practice_sessions FOR UPDATE TO authenticated
     USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-DO $$ BEGIN
-  CREATE POLICY "Users can delete own practice sessions"
+DROP POLICY IF EXISTS "Users can delete own practice sessions" ON practice_sessions;
+CREATE POLICY "Users can delete own practice sessions"
     ON practice_sessions FOR DELETE TO authenticated USING (auth.uid() = user_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ─── theatre_notes ───────────────────────────────────────────────────────────
-DO $$ BEGIN
-  CREATE POLICY "Users can manage own theatre notes"
+DROP POLICY IF EXISTS "Users can manage own theatre notes" ON theatre_notes;
+CREATE POLICY "Users can manage own theatre notes"
     ON theatre_notes FOR ALL TO authenticated
     USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ─── leagues ─────────────────────────────────────────────────────────────────
-DO $$ BEGIN
-  CREATE POLICY "Anyone can read public leagues"
-    ON leagues FOR SELECT TO authenticated
-    USING (privacy = 'public' OR type = 'PUBLIC');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DROP POLICY IF EXISTS "Anyone can read public leagues" ON leagues;
+CREATE POLICY "Anyone can read public leagues"
+  ON leagues FOR SELECT TO authenticated
+  USING (privacy = 'public' OR type = 'PUBLIC');
 
-DO $$ BEGIN
-  CREATE POLICY "Users can read private leagues they are in"
-    ON leagues FOR SELECT TO authenticated
-    USING (
-      (privacy = 'private' OR type = 'PRIVATE') AND id IN (
-        SELECT league_id FROM league_members WHERE user_id = auth.uid()
-      )
-    );
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DROP POLICY IF EXISTS "Users can read private leagues they are in" ON leagues;
+CREATE POLICY "Users can read private leagues they are in"
+  ON leagues FOR SELECT TO authenticated
+  USING (
+    (privacy = 'private' OR type = 'PRIVATE') AND id IN (
+      SELECT league_id FROM league_members WHERE user_id = auth.uid()
+    )
+  );
 
-DO $$ BEGIN
-  CREATE POLICY "Owners can update their leagues"
-    ON leagues FOR UPDATE TO authenticated
-    USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid());
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DROP POLICY IF EXISTS "Owners can update their leagues" ON leagues;
+CREATE POLICY "Owners can update their leagues"
+  ON leagues FOR UPDATE TO authenticated
+  USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid());
 
-DO $$ BEGIN
-  CREATE POLICY "Owners can delete their leagues"
-    ON leagues FOR DELETE TO authenticated USING (owner_id = auth.uid());
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DROP POLICY IF EXISTS "Owners can delete their leagues" ON leagues;
+CREATE POLICY "Owners can delete their leagues"
+  ON leagues FOR DELETE TO authenticated USING (owner_id = auth.uid());
 
-DO $$ BEGIN
-  CREATE POLICY "Authenticated users can insert leagues"
+DROP POLICY IF EXISTS "Authenticated users can insert leagues" ON leagues;
+CREATE POLICY "Authenticated users can insert leagues"
     ON leagues FOR INSERT TO authenticated WITH CHECK (true);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ─── league_members ───────────────────────────────────────────────────────────
-DO $$ BEGIN
-  CREATE POLICY "Members can see members of public leagues"
+DROP POLICY IF EXISTS "Members can see members of public leagues" ON league_members;
+CREATE POLICY "Members can see members of public leagues"
     ON league_members FOR SELECT TO authenticated
     USING (
       league_id IN (SELECT id FROM leagues WHERE privacy = 'public' OR type = 'PUBLIC')
     );
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-DO $$ BEGIN
-  CREATE POLICY "Members can see members of leagues they are in"
+DROP POLICY IF EXISTS "Members can see members of leagues they are in" ON league_members;
+CREATE POLICY "Members can see members of leagues they are in"
     ON league_members FOR SELECT TO authenticated
     USING (
       league_id IN (SELECT league_id FROM league_members WHERE user_id = auth.uid())
     );
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-DO $$ BEGIN
-  CREATE POLICY "Users can join leagues"
+DROP POLICY IF EXISTS "Users can join leagues" ON league_members;
+CREATE POLICY "Users can join leagues"
     ON league_members FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-DO $$ BEGIN
-  CREATE POLICY "Admins can update members"
+DROP POLICY IF EXISTS "Admins can update members" ON league_members;
+CREATE POLICY "Admins can update members"
     ON league_members FOR UPDATE TO authenticated
     USING (
       league_id IN (
@@ -658,10 +626,9 @@ DO $$ BEGIN
         WHERE user_id = auth.uid() AND role IN ('owner', 'admin')
       )
     );
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-DO $$ BEGIN
-  CREATE POLICY "Admins can remove members"
+DROP POLICY IF EXISTS "Admins can remove members" ON league_members;
+CREATE POLICY "Admins can remove members"
     ON league_members FOR DELETE TO authenticated
     USING (
       user_id = auth.uid() OR  -- users can leave
@@ -670,48 +637,43 @@ DO $$ BEGIN
         WHERE user_id = auth.uid() AND role IN ('owner', 'admin')
       )
     );
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ─── league_settings ─────────────────────────────────────────────────────────
-DO $$ BEGIN
-  CREATE POLICY "Users can read settings of their leagues"
+DROP POLICY IF EXISTS "Users can read settings of their leagues" ON league_settings;
+CREATE POLICY "Users can read settings of their leagues"
     ON league_settings FOR SELECT TO authenticated
     USING (
       league_id IN (SELECT league_id FROM league_members WHERE user_id = auth.uid())
     );
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ─── league_matches ───────────────────────────────────────────────────────────
-DO $$ BEGIN
-  CREATE POLICY "Users can read league matches if in league"
+DROP POLICY IF EXISTS "Users can read league matches if in league" ON league_matches;
+CREATE POLICY "Users can read league matches if in league"
     ON league_matches FOR SELECT TO authenticated
     USING (
       league_id IN (SELECT league_id FROM league_members WHERE user_id = auth.uid()) OR
       opponent_league_id IN (SELECT league_id FROM league_members WHERE user_id = auth.uid())
     );
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ─── league_chats ─────────────────────────────────────────────────────────────
-DO $$ BEGIN
-  CREATE POLICY "Users can read league chats if member"
+DROP POLICY IF EXISTS "Users can read league chats if member" ON league_chats;
+CREATE POLICY "Users can read league chats if member"
     ON league_chats FOR SELECT TO authenticated
     USING (
       league_id IN (SELECT league_id FROM league_members WHERE user_id = auth.uid())
     );
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-DO $$ BEGIN
-  CREATE POLICY "Users can insert league chats if member"
+DROP POLICY IF EXISTS "Users can insert league chats if member" ON league_chats;
+CREATE POLICY "Users can insert league chats if member"
     ON league_chats FOR INSERT TO authenticated
     WITH CHECK (
       user_id = auth.uid() AND
       league_id IN (SELECT league_id FROM league_members WHERE user_id = auth.uid())
     );
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ─── league_match_chats ───────────────────────────────────────────────────────
-DO $$ BEGIN
-  CREATE POLICY "Users can read league match chats if in league"
+DROP POLICY IF EXISTS "Users can read league match chats if in league" ON league_match_chats;
+CREATE POLICY "Users can read league match chats if in league"
     ON league_match_chats FOR SELECT TO authenticated
     USING (
       league_match_id IN (
@@ -720,10 +682,9 @@ DO $$ BEGIN
            OR opponent_league_id IN (SELECT league_id FROM league_members WHERE user_id = auth.uid())
       )
     );
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-DO $$ BEGIN
-  CREATE POLICY "Users can insert league match chats if in league"
+DROP POLICY IF EXISTS "Users can insert league match chats if in league" ON league_match_chats;
+CREATE POLICY "Users can insert league match chats if in league"
     ON league_match_chats FOR INSERT TO authenticated
     WITH CHECK (
       user_id = auth.uid() AND
@@ -733,26 +694,23 @@ DO $$ BEGIN
            OR opponent_league_id IN (SELECT league_id FROM league_members WHERE user_id = auth.uid())
       )
     );
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ─── playoff_matches ─────────────────────────────────────────────────────────
-DO $$ BEGIN
-  CREATE POLICY "Members can read playoff matches in their league"
+DROP POLICY IF EXISTS "Members can read playoff matches in their league" ON playoff_matches;
+CREATE POLICY "Members can read playoff matches in their league"
     ON playoff_matches FOR SELECT TO authenticated
     USING (
       league_id IN (SELECT league_id FROM league_members WHERE user_id = auth.uid())
     );
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ─── user_league_badges ───────────────────────────────────────────────────────
-DO $$ BEGIN
-  CREATE POLICY "Users can read own or league member badges"
+DROP POLICY IF EXISTS "Users can read own or league member badges" ON user_league_badges;
+CREATE POLICY "Users can read own or league member badges"
     ON user_league_badges FOR SELECT TO authenticated
     USING (
       user_id = auth.uid() OR
       league_id IN (SELECT league_id FROM league_members WHERE user_id = auth.uid())
     );
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ============================================================================
 -- 6. BUSINESS LOGIC FUNCTIONS
