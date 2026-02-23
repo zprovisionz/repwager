@@ -9,12 +9,20 @@
  * - Automatic dismiss after 3 seconds
  */
 
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Animated, Modal } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { View, Text, StyleSheet, Animated, Modal, Dimensions } from 'react-native';
 import { Zap, Star } from 'lucide-react-native';
 import { colors, radius } from '@/lib/theme';
 import { getLevelInfo } from '@/lib/levelSystem';
 import type { Level } from '@/lib/levelSystem';
+
+const { width, height } = Dimensions.get('window');
+
+interface Particle {
+  id: number;
+  left: number;
+  color: string;
+}
 
 interface LevelUpAnimationProps {
   visible: boolean;
@@ -24,6 +32,76 @@ interface LevelUpAnimationProps {
   onDismiss?: () => void;
 }
 
+/**
+ * Individual confetti particle that falls from top
+ */
+function ConfettiParticle({ particle }: { particle: Particle }) {
+  const fallAnim = useRef(new Animated.Value(0)).current;
+  const rotateAnim = useRef(new Animated.Value(0)).current;
+  const swayAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const delay = Math.random() * 100;
+    const duration = 1800 + Math.random() * 400;
+
+    setTimeout(() => {
+      Animated.parallel([
+        // Fall animation
+        Animated.timing(fallAnim, {
+          toValue: height,
+          duration,
+          useNativeDriver: true,
+        }),
+        // Rotation animation
+        Animated.loop(
+          Animated.timing(rotateAnim, {
+            toValue: 1,
+            duration: 800,
+            useNativeDriver: true,
+          })
+        ),
+        // Sway animation
+        Animated.sequence([
+          Animated.timing(swayAnim, { toValue: 1, duration: duration / 2, useNativeDriver: true }),
+          Animated.timing(swayAnim, { toValue: -1, duration: duration / 2, useNativeDriver: true }),
+        ]),
+      ]).start();
+    }, delay);
+  }, [fallAnim, rotateAnim, swayAnim]);
+
+  return (
+    <Animated.View
+      style={[
+        styles.particle,
+        {
+          left: particle.left,
+          transform: [
+            { translateY: fallAnim },
+            {
+              translateX: swayAnim.interpolate({
+                inputRange: [-1, 0, 1],
+                outputRange: [-20, 0, 20],
+              }),
+            },
+            {
+              rotate: rotateAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: ['0deg', '360deg'],
+              }),
+            },
+          ],
+          opacity: fallAnim.interpolate({
+            inputRange: [0, height * 0.8, height],
+            outputRange: [1, 1, 0],
+          }),
+        },
+      ]}
+    >
+      <View style={[styles.particleInner, { backgroundColor: particle.color }]} />
+    </Animated.View>
+  );
+}
+
 export function LevelUpAnimation({
   visible,
   level,
@@ -31,15 +109,32 @@ export function LevelUpAnimation({
   xp,
   onDismiss,
 }: LevelUpAnimationProps) {
-  const scaleAnim = new Animated.Value(0);
-  const opacityAnim = new Animated.Value(1);
+  const scaleAnim = useRef(new Animated.Value(0)).current;
+  const opacityAnim = useRef(new Animated.Value(1)).current;
+  const [particles, setParticles] = useState<Particle[]>([]);
+  const particleIdRef = useRef(0);
   const levelInfo = getLevelInfo(level);
+
+  // Generate confetti particles
+  const generateParticles = () => {
+    const colors_list = [colors.primary, colors.accent, colors.secondary, colors.success];
+    const newParticles: Particle[] = Array.from({ length: 30 }, (_, i) => ({
+      id: particleIdRef.current++,
+      left: Math.random() * width,
+      color: colors_list[Math.floor(Math.random() * colors_list.length)],
+    }));
+    setParticles(newParticles);
+  };
 
   useEffect(() => {
     if (!visible) {
       scaleAnim.setValue(0);
+      setParticles([]);
       return;
     }
+
+    // Generate confetti when modal appears
+    generateParticles();
 
     // Animate in
     Animated.sequence([
@@ -58,6 +153,7 @@ export function LevelUpAnimation({
     ]).start(() => {
       scaleAnim.setValue(0);
       opacityAnim.setValue(1);
+      setParticles([]);
       onDismiss?.();
     });
   }, [visible, scaleAnim, opacityAnim, onDismiss]);
@@ -72,6 +168,10 @@ export function LevelUpAnimation({
       pointerEvents="none"
     >
       <View style={styles.container}>
+        {/* Confetti particles */}
+        {particles.map((particle) => (
+          <ConfettiParticle key={particle.id} particle={particle} />
+        ))}
         <Animated.View
           style={[
             styles.content,
@@ -259,5 +359,16 @@ const styles = StyleSheet.create({
     marginTop: 16,
     marginHorizontal: -28,
     marginBottom: -28,
+  },
+  particle: {
+    position: 'absolute',
+    top: -20,
+    width: 12,
+    height: 12,
+  },
+  particleInner: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
   },
 });
