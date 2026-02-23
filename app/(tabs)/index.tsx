@@ -39,6 +39,7 @@ export default function HomeScreen() {
   const [accepting, setAccepting] = useState<string | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showPractice, setShowPractice] = useState(false);
+  const [showStreakBanner, setShowStreakBanner] = useState(false);
 
   async function load() {
     if (!session?.user) return;
@@ -55,6 +56,11 @@ export default function HomeScreen() {
       setHotMatches(hot.filter((m: any) => m.challenger_id !== session.user.id));
       setMyRank(rank);
       setStreakStatus(streak);
+      // Show streak banner if user has active streak
+      if (streak.currentStreak > 0) {
+        setShowStreakBanner(true);
+        setTimeout(() => setShowStreakBanner(false), 5000); // Auto-dismiss after 5s
+      }
     } catch (error) {
       console.error('[HomeScreen] Failed to load matches:', error);
       showToast({ type: 'error', title: 'Failed to load matches' });
@@ -124,6 +130,20 @@ export default function HomeScreen() {
 
   return (
     <>
+      {/* Streak celebration banner */}
+      {showStreakBanner && streakStatus && streakStatus.currentStreak > 0 && (
+        <View style={styles.streakBanner}>
+          <LinearGradient colors={['#FF6B35', '#FF8C42']} style={styles.streakBannerGradient}>
+            <Flame size={20} color="#FFF" />
+            <View style={styles.streakBannerText}>
+              <Text style={styles.streakBannerTitle}>🔥 {streakStatus.currentStreak}-Day Streak!</Text>
+              <Text style={styles.streakBannerSubtitle}>Keep it going—one match at a time! 💪</Text>
+            </View>
+            {streakStatus.freezeAvailable && <Shield size={18} color="#FFF" />}
+          </LinearGradient>
+        </View>
+      )}
+
       <ScrollView
         style={styles.container}
         contentContainerStyle={{ paddingBottom: 80 }}
@@ -670,5 +690,39 @@ const styles = StyleSheet.create({
     fontFamily: typography.fontBodyBold,
     fontSize: 14,
     color: colors.textInverse,
+  },
+  streakBanner: {
+    marginHorizontal: spacing.md,
+    marginTop: spacing.md,
+    marginBottom: spacing.md,
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+    shadowColor: '#FF6B35',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  streakBannerGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    gap: spacing.md,
+  },
+  streakBannerText: {
+    flex: 1,
+  },
+  streakBannerTitle: {
+    fontFamily: typography.fontDisplay,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFF',
+    marginBottom: spacing.xs,
+  },
+  streakBannerSubtitle: {
+    fontFamily: typography.fontBody,
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.9)',
   },
 });
