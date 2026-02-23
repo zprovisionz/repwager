@@ -53,6 +53,7 @@ export default function LeagueDetailScreen() {
   const [activeTab, setActiveTab] = useState<'members' | 'chat' | 'matches'>('members');
   const [chatMessage, setChatMessage] = useState('');
   const [sendingChat, setSendingChat] = useState(false);
+  const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
 
   const leagueId = typeof id === 'string' ? id : '';
   const isOwner = league?.owner_id === user?.id;
@@ -211,6 +212,15 @@ export default function LeagueDetailScreen() {
             scrollEnabled={false}
           />
 
+          {/* Typing indicator */}
+          {typingUsers.size > 0 && (
+            <View style={styles.typingIndicator}>
+              <Text style={styles.typingText}>
+                {Array.from(typingUsers).slice(0, 2).join(', ')}{typingUsers.size > 2 ? ', +' + (typingUsers.size - 2) : ''} {typingUsers.size === 1 ? 'is' : 'are'} typing...
+              </Text>
+            </View>
+          )}
+
           {user && (
             <View style={styles.chatInput}>
               <TextInput
@@ -218,12 +228,23 @@ export default function LeagueDetailScreen() {
                 placeholder="Send a message..."
                 placeholderTextColor={colors.textSecondary}
                 value={chatMessage}
-                onChangeText={setChatMessage}
+                onChangeText={(text) => {
+                  setChatMessage(text);
+                  // Show typing indicator when user types
+                  if (text.length > 0 && typingUsers.size === 0) {
+                    setTypingUsers(new Set([user.id]));
+                  } else if (text.length === 0) {
+                    setTypingUsers(new Set());
+                  }
+                }}
                 editable={!sendingChat}
               />
               <TouchableOpacity
                 style={[styles.chatSendButton, sendingChat && styles.chatSendButtonDisabled]}
-                onPress={handleSendChat}
+                onPress={() => {
+                  setTypingUsers(new Set()); // Clear typing indicator
+                  handleSendChat();
+                }}
                 disabled={sendingChat || !chatMessage.trim()}
               >
                 <MessageCircle size={20} color={colors.textInverse} />
@@ -685,6 +706,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: colors.textInverse,
+  },
+  typingIndicator: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.bg,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  typingText: {
+    fontFamily: typography.fontBody,
+    fontSize: 12,
+    color: colors.textMuted,
+    fontStyle: 'italic',
   },
 });
 
