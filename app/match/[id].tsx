@@ -322,6 +322,31 @@ export default function MatchScreen() {
           </View>
         </View>
 
+        {/* Deadline Warning Banner */}
+        {match && secondsUntilDeadline < 300 && phase !== 'expired' && (
+          <View
+            style={[
+              styles.deadlineWarning,
+              secondsUntilDeadline < 60 ? styles.deadlineWarningCritical : null,
+            ]}
+          >
+            <AlertCircle
+              size={18}
+              color={secondsUntilDeadline < 60 ? '#FF3B30' : '#FF9500'}
+            />
+            <View style={styles.deadlineWarningText}>
+              <Text style={styles.deadlineWarningTitle}>
+                {secondsUntilDeadline < 60 ? '⏰ URGENT' : '⏰ Deadline approaching'}
+              </Text>
+              <Text style={styles.deadlineWarningSubtitle}>
+                {secondsUntilDeadline < 60
+                  ? `Submit within ${formatTime(secondsUntilDeadline)}`
+                  : `${Math.ceil(secondsUntilDeadline / 60)} minutes remaining`}
+              </Text>
+            </View>
+          </View>
+        )}
+
         {/* Center Content based on Phase */}
 
         {/* PRE-RECORD PHASE: Show exercise info + deadline + start button */}
@@ -1006,5 +1031,37 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     padding: spacing.md,
     alignItems: 'center',
+  },
+  deadlineWarning: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,149,0,0.15)',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginHorizontal: spacing.md,
+    marginTop: spacing.sm,
+    marginBottom: spacing.md,
+    borderRadius: radius.md,
+    borderLeftWidth: 4,
+    borderLeftColor: '#FF9500',
+    gap: spacing.md,
+  },
+  deadlineWarningCritical: {
+    backgroundColor: 'rgba(255,59,48,0.15)',
+    borderLeftColor: '#FF3B30',
+  },
+  deadlineWarningText: {
+    flex: 1,
+  },
+  deadlineWarningTitle: {
+    fontFamily: typography.fontBodyBold,
+    fontSize: 13,
+    color: colors.text,
+    marginBottom: spacing.xs,
+  },
+  deadlineWarningSubtitle: {
+    fontFamily: typography.fontBody,
+    fontSize: 12,
+    color: colors.textSecondary,
   },
 });
