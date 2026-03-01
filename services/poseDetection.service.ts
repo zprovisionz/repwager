@@ -6,6 +6,13 @@
   accept poses from any source (MoveNet CDN bundle on web, manual tap on native).
 */
 
+import {
+  PUSH_UP_ELBOW_LOCKOUT_ANGLE,
+  PUSH_UP_BOTTOM_ANGLE,
+  SQUAT_BOTTOM_ANGLE,
+  SQUAT_LOCKOUT_ANGLE,
+} from '@/lib/config';
+
 export type ExerciseType = 'push_ups' | 'squats';
 export type RepPhase = 'up' | 'down';
 
@@ -19,10 +26,6 @@ export interface Keypoint {
 export interface Pose {
   keypoints: Keypoint[];
 }
-
-const PUSH_UP_ELBOW_LOCKOUT_ANGLE = 160;
-const PUSH_UP_BOTTOM_ANGLE = 90;
-const SQUAT_BOTTOM_ANGLE = 90;
 
 function getAngle(a: Keypoint, b: Keypoint, c: Keypoint): number {
   const radians =
@@ -49,23 +52,17 @@ export function analyzePushUp(
   const rWrist = getKeypoint(pose, 'right_wrist');
 
   if (!lShoulder || !lElbow || !lWrist || !rShoulder || !rElbow || !rWrist) {
-    const missing = ['left_shoulder','left_elbow','left_wrist','right_shoulder','right_elbow','right_wrist']
-      .filter((_, i) => ![lShoulder, lElbow, lWrist, rShoulder, rElbow, rWrist][i]);
-    console.log('[poseDetection] analyzePushUp — missing/low-confidence keypoints:', missing.join(', '));
     return { newPhase: phase, repCounted: false };
   }
 
   const leftAngle = getAngle(lShoulder, lElbow, lWrist);
   const rightAngle = getAngle(rShoulder, rElbow, rWrist);
   const avgAngle = (leftAngle + rightAngle) / 2;
-  console.log('[poseDetection] analyzePushUp — leftAngle:', leftAngle.toFixed(1), '| rightAngle:', rightAngle.toFixed(1), '| avgAngle:', avgAngle.toFixed(1), '| phase:', phase, '| thresholds: bottom <', PUSH_UP_BOTTOM_ANGLE, 'lockout >', PUSH_UP_ELBOW_LOCKOUT_ANGLE);
 
   if (phase === 'up' && avgAngle < PUSH_UP_BOTTOM_ANGLE) {
-    console.log('[poseDetection] analyzePushUp — phase transition: up -> down');
     return { newPhase: 'down', repCounted: false };
   }
   if (phase === 'down' && avgAngle > PUSH_UP_ELBOW_LOCKOUT_ANGLE) {
-    console.log('[poseDetection] analyzePushUp — REP COUNTED (down -> up)');
     return { newPhase: 'up', repCounted: true };
   }
   return { newPhase: phase, repCounted: false };
@@ -83,23 +80,17 @@ export function analyzeSquat(
   const rAnkle = getKeypoint(pose, 'right_ankle');
 
   if (!lHip || !lKnee || !lAnkle || !rHip || !rKnee || !rAnkle) {
-    const missing = ['left_hip','left_knee','left_ankle','right_hip','right_knee','right_ankle']
-      .filter((_, i) => ![lHip, lKnee, lAnkle, rHip, rKnee, rAnkle][i]);
-    console.log('[poseDetection] analyzeSquat — missing/low-confidence keypoints:', missing.join(', '));
     return { newPhase: phase, repCounted: false };
   }
 
   const leftAngle = getAngle(lHip, lKnee, lAnkle);
   const rightAngle = getAngle(rHip, rKnee, rAnkle);
   const avgAngle = (leftAngle + rightAngle) / 2;
-  console.log('[poseDetection] analyzeSquat — leftAngle:', leftAngle.toFixed(1), '| rightAngle:', rightAngle.toFixed(1), '| avgAngle:', avgAngle.toFixed(1), '| phase:', phase, '| thresholds: bottom <', SQUAT_BOTTOM_ANGLE, 'lockout > 120');
 
   if (phase === 'up' && avgAngle < SQUAT_BOTTOM_ANGLE) {
-    console.log('[poseDetection] analyzeSquat — phase transition: up -> down');
     return { newPhase: 'down', repCounted: false };
   }
-  if (phase === 'down' && avgAngle > 120) {
-    console.log('[poseDetection] analyzeSquat — REP COUNTED (down -> up)');
+  if (phase === 'down' && avgAngle > SQUAT_LOCKOUT_ANGLE) {
     return { newPhase: 'up', repCounted: true };
   }
   return { newPhase: phase, repCounted: false };

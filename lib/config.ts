@@ -11,6 +11,7 @@ export const MAX_WAGER = 50;
 export const PUSH_UP_ELBOW_LOCKOUT_ANGLE = 160;
 export const PUSH_UP_BOTTOM_ANGLE = 90;
 export const SQUAT_BOTTOM_ANGLE = 90;
+export const SQUAT_LOCKOUT_ANGLE = 120;
 
 export const EXERCISE_LABELS: Record<string, string> = {
   push_ups: 'Push-Ups',

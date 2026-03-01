@@ -6,7 +6,7 @@ import { colors, typography, spacing, radius } from '@/lib/theme';
 import { useAuthStore } from '@/stores/authStore';
 import { useMatchStore } from '@/stores/matchStore';
 import { useToastStore } from '@/stores/toastStore';
-import { Trophy, Frown, Zap, Share2 } from 'lucide-react-native';
+import { Trophy, Frown, Zap } from 'lucide-react-native';
 import Button from '@/components/ui/Button';
 import { checkAndAwardBadges } from '@/services/badge.service';
 
@@ -45,7 +45,12 @@ function ConfettiPiece({ delay, color }: { delay: number; color: string }) {
 const CONFETTI_COLORS = [colors.primary, colors.secondary, colors.accent, colors.success, '#ff6b6b', '#ffd93d'];
 
 export default function ResultsScreen() {
-  const { matchId, myReps, isWinner } = useLocalSearchParams<{ matchId: string; myReps: string; isWinner: string }>();
+  const { matchId, myReps, isWinner, exerciseType } = useLocalSearchParams<{
+    matchId: string;
+    myReps: string;
+    isWinner: string;
+    exerciseType: string;
+  }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { session, profile, refreshProfile } = useAuthStore();
@@ -65,7 +70,8 @@ export default function ResultsScreen() {
     ]).start();
 
     if (session?.user && profile) {
-      checkAndAwardBadges(session.user.id, profile, reps).then((badges) => {
+      const exercise = exerciseType === 'push_ups' || exerciseType === 'squats' ? exerciseType : undefined;
+      checkAndAwardBadges(session.user.id, profile, reps, exercise).then((badges) => {
         badges.forEach((b) => {
           showToast({ type: 'badge', title: 'Badge Earned!', message: b.replace(/_/g, ' ') });
         });

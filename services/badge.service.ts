@@ -17,7 +17,12 @@ export async function getAllBadges(): Promise<Badge[]> {
   return (data ?? []) as Badge[];
 }
 
-export async function checkAndAwardBadges(userId: string, profile: Profile, matchReps?: number): Promise<string[]> {
+export async function checkAndAwardBadges(
+  userId: string,
+  profile: Profile,
+  matchReps?: number,
+  exerciseType?: 'push_ups' | 'squats'
+): Promise<string[]> {
   const awarded: string[] = [];
 
   const checkBadge = async (badgeId: string, condition: boolean) => {
@@ -40,9 +45,9 @@ export async function checkAndAwardBadges(userId: string, profile: Profile, matc
   await checkBadge('veteran', profile.wins + profile.losses >= 50);
   await checkBadge('rep_legend', profile.total_reps >= 1000);
 
-  if (matchReps !== undefined) {
-    await checkBadge('pushup_centurion', matchReps >= 100);
-    await checkBadge('squat_master', matchReps >= 100);
+  if (matchReps !== undefined && exerciseType) {
+    await checkBadge('pushup_centurion', exerciseType === 'push_ups' && matchReps >= 100);
+    await checkBadge('squat_master', exerciseType === 'squats' && matchReps >= 100);
   }
 
   return awarded;

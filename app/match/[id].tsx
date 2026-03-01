@@ -10,7 +10,8 @@ import { getMatch, startMatch, completeMatch, setReady, subscribeToMatch } from 
 import { usePoseDetection } from '@/hooks/usePoseDetection';
 import { useMatchTimer } from '@/hooks/useMatchTimer';
 import { colors, typography, spacing, radius } from '@/lib/theme';
-import { EXERCISE_LABELS } from '@/lib/config';
+import { DEV_MODE_MANUAL_COUNT, EXERCISE_LABELS } from '@/lib/config';
+import { supabase } from '@/lib/supabase';
 import { X, Zap } from 'lucide-react-native';
 import type { Match } from '@/types/database';
 
@@ -20,26 +21,34 @@ export default function MatchScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { session, profile } = useAuthStore();
-  const { setActiveMatch, updateMyReps, activeMatch } = useMatchStore();
+  const { session } = useAuthStore();
+  const { setActiveMatch, updateMyReps, updateOpponentReps, activeMatch } = useMatchStore();
   const { show: showToast } = useToastStore();
 
   const [phase, setPhase] = useState<MatchPhase>('loading');
+  // phaseRef prevents stale closures in subscription callbacks and async functions
+  const phaseRef = useRef<MatchPhase>('loading');
   const [match, setMatch] = useState<Match | null>(null);
+  // matchRef ensures subscription callback always has current match data
+  const matchRef = useRef<Match | null>(null);
   const [countdown, setCountdown] = useState(3);
   const [permission, requestPermission] = useCameraPermissions();
   const countdownAnim = useRef(new Animated.Value(1)).current;
-
-  console.log('[MatchScreen] render — phase:', phase, '| permission:', permission ? `granted=${permission.granted} canAsk=${permission.canAskAgain}` : 'null (loading)');
   const repAnim = useRef(new Animated.Value(1)).current;
   const subscriptionRef = useRef<any>(null);
+  const repSyncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const isChallenger = match?.challenger_id === session?.user?.id;
+  // Keep both phase state and ref in sync on every phase transition
+  function updatePhase(next: MatchPhase) {
+    phaseRef.current = next;
+    setPhase(next);
+  }
+
+  const isChallenger = matchRef.current?.challenger_id === session?.user?.id;
   const myReps = activeMatch?.myReps ?? 0;
   const timeLeft = activeMatch?.timeLeft ?? 60;
 
   const handleRepCounted = useCallback((total: number) => {
-    console.log('[MatchScreen] handleRepCounted — total:', total);
     updateMyReps(total);
     Animated.sequence([
       Animated.timing(repAnim, { toValue: 1.4, duration: 80, useNativeDriver: true }),
@@ -47,36 +56,76 @@ export default function MatchScreen() {
     ]).start();
   }, [updateMyReps, repAnim]);
 
-  const { repCount, isReady: poseReady, processFrame, manualIncrement, reset: resetPose } = usePoseDetection({
+  const { processFrame, manualIncrement, reset: resetPose } = usePoseDetection({
     exerciseType: match?.exercise_type ?? 'push_ups',
     onRepCounted: handleRepCounted,
     enabled: phase === 'active',
   });
 
-  const handleMatchComplete = useCallback(async () => {
-    if (!match || !session?.user) return;
-    setPhase('finishing');
+  // Debounced rep sync to DB so both clients can read each other's live rep counts
+  useEffect(() => {
+    if (phaseRef.current !== 'active' || !matchRef.current) return;
+    const field = isChallenger ? 'challenger_reps' : 'opponent_reps';
+    if (repSyncTimeoutRef.current) clearTimeout(repSyncTimeoutRef.current);
+    repSyncTimeoutRef.current = setTimeout(() => {
+      (supabase.from('matches') as any)
+        .update({ [field]: myReps })
+        .eq('id', matchRef.current!.id)
+        .then(() => {});
+    }, 500);
+    return () => {
+      if (repSyncTimeoutRef.current) clearTimeout(repSyncTimeoutRef.current);
+    };
+  }, [myReps]);
 
-    const finalReps = useMatchStore.getState().activeMatch?.myReps ?? 0;
-    const challengerReps = isChallenger ? finalReps : (activeMatch?.opponentReps ?? 0);
-    const opponentReps = isChallenger ? (activeMatch?.opponentReps ?? 0) : finalReps;
+  const handleMatchComplete = useCallback(async () => {
+    if (!matchRef.current || !session?.user) return;
+    updatePhase('finishing');
+
+    const storeState = useMatchStore.getState().activeMatch;
+    const finalReps = storeState?.myReps ?? 0;
+    const opponentFinalReps = storeState?.opponentReps ?? 0;
+
+    const currentMatch = matchRef.current;
+    const currentIsChallenger = currentMatch.challenger_id === session.user.id;
+    const challengerReps = currentIsChallenger ? finalReps : opponentFinalReps;
+    const opponentReps = currentIsChallenger ? opponentFinalReps : finalReps;
+    const winnerId =
+      challengerReps >= opponentReps
+        ? currentMatch.challenger_id
+        : (currentMatch.opponent_id ?? currentMatch.challenger_id);
 
     try {
-      const winnerId = challengerReps >= opponentReps ? match.challenger_id : (match.opponent_id ?? match.challenger_id);
-      await completeMatch(match.id, winnerId, challengerReps, opponentReps);
-
-      router.replace({
-        pathname: '/match/results',
-        params: {
-          matchId: match.id,
-          myReps: finalReps.toString(),
-          isWinner: (session.user.id === winnerId).toString(),
-        },
-      });
-    } catch (err) {
+      await completeMatch(currentMatch.id, winnerId, challengerReps, opponentReps);
+    } catch (err: any) {
+      // Other client already completed the match — fetch the authoritative result
+      if (err?.message?.includes('cannot be completed in status')) {
+        const finalMatch = await getMatch(currentMatch.id).catch(() => null);
+        router.replace({
+          pathname: '/match/results',
+          params: {
+            matchId: currentMatch.id,
+            myReps: finalReps.toString(),
+            isWinner: (finalMatch?.winner_id === session.user.id).toString(),
+            exerciseType: currentMatch.exercise_type,
+          },
+        });
+        return;
+      }
       showToast({ type: 'error', title: 'Error completing match' });
+      return;
     }
-  }, [match, session, isChallenger, activeMatch, router, showToast]);
+
+    router.replace({
+      pathname: '/match/results',
+      params: {
+        matchId: currentMatch.id,
+        myReps: finalReps.toString(),
+        isWinner: (session.user.id === winnerId).toString(),
+        exerciseType: currentMatch.exercise_type,
+      },
+    });
+  }, [session, router, showToast]);
 
   const { start: startTimer } = useMatchTimer({ onComplete: handleMatchComplete });
 
@@ -86,28 +135,43 @@ export default function MatchScreen() {
   }, [id]);
 
   async function loadMatch() {
-    console.log('[MatchScreen] loadMatch — id:', id, '| user:', session?.user?.id);
     try {
       const m = await getMatch(id!);
       if (!m) throw new Error('Match not found');
-      console.log('[MatchScreen] loadMatch — fetched match:', { id: m.id, status: m.status, exercise: m.exercise_type, challengerReady: m.challenger_ready, opponentReady: m.opponent_ready });
+
       setMatch(m);
+      matchRef.current = m;
       setActiveMatch(m);
 
       if (m.status === 'accepted' || m.status === 'in_progress') {
-        setPhase('waiting');
+        updatePhase('waiting');
       }
 
       subscriptionRef.current = subscribeToMatch(m.id, (updated) => {
-        console.log('[MatchScreen] subscribeToMatch update — status:', updated.status, '| challengerReady:', updated.challenger_ready, '| opponentReady:', updated.opponent_ready);
         setMatch(updated);
-        if (updated.challenger_ready && updated.opponent_ready && phase !== 'active') {
-          console.log('[MatchScreen] both players ready — starting countdown');
+        matchRef.current = updated;
+
+        // Sync opponent's live reps during active phase
+        if (phaseRef.current === 'active') {
+          const amChallenger = session?.user?.id === updated.challenger_id;
+          const opponentDbReps = amChallenger
+            ? (updated.opponent_reps ?? 0)
+            : (updated.challenger_reps ?? 0);
+          updateOpponentReps(opponentDbReps);
+        }
+
+        // Only start countdown once — phaseRef prevents the stale-closure double-fire
+        if (
+          updated.challenger_ready &&
+          updated.opponent_ready &&
+          phaseRef.current !== 'countdown' &&
+          phaseRef.current !== 'active' &&
+          phaseRef.current !== 'finishing'
+        ) {
           beginCountdown();
         }
       });
-    } catch (err) {
-      console.error('[MatchScreen] loadMatch error:', err);
+    } catch {
       showToast({ type: 'error', title: 'Match not found' });
       router.back();
     }
@@ -116,29 +180,34 @@ export default function MatchScreen() {
   useEffect(() => {
     return () => {
       subscriptionRef.current?.unsubscribe();
+      if (repSyncTimeoutRef.current) clearTimeout(repSyncTimeoutRef.current);
     };
   }, []);
 
   async function handleReady() {
-    if (!match || !session?.user) return;
-    console.log('[MatchScreen] handleReady — matchId:', match.id, '| isChallenger:', isChallenger);
+    if (!matchRef.current || !session?.user) return;
     try {
-      const updated = await setReady(match.id, session.user.id, isChallenger);
-      console.log('[MatchScreen] handleReady — updated ready flags:', { challengerReady: updated.challenger_ready, opponentReady: updated.opponent_ready });
+      const updated = await setReady(matchRef.current.id, session.user.id, isChallenger);
       setMatch(updated);
+      matchRef.current = updated;
       if (updated.challenger_ready && updated.opponent_ready) {
-        console.log('[MatchScreen] handleReady — both ready, starting countdown');
         beginCountdown();
       }
-    } catch (err) {
-      console.error('[MatchScreen] handleReady error:', err);
+    } catch {
       showToast({ type: 'error', title: 'Could not mark ready' });
     }
   }
 
   function beginCountdown() {
-    console.log('[MatchScreen] beginCountdown — starting 3…2…1');
-    setPhase('countdown');
+    // Guard using phaseRef — prevents double-fire from stale subscription closures
+    if (
+      phaseRef.current === 'countdown' ||
+      phaseRef.current === 'active' ||
+      phaseRef.current === 'finishing'
+    ) {
+      return;
+    }
+    updatePhase('countdown');
     setCountdown(3);
     let count = 3;
     const tick = () => {
@@ -146,18 +215,18 @@ export default function MatchScreen() {
         Animated.timing(countdownAnim, { toValue: 1.5, duration: 200, useNativeDriver: true }),
         Animated.timing(countdownAnim, { toValue: 0.8, duration: 700, useNativeDriver: true }),
       ]).start();
-
       if (count > 1) {
         count--;
         setCountdown(count);
         setTimeout(tick, 1000);
       } else {
         setTimeout(() => {
-          console.log('[MatchScreen] beginCountdown — GO! setting phase=active');
-          setPhase('active');
+          updatePhase('active');
           resetPose();
           startTimer();
-          if (match) startMatch(match.id).catch((err) => console.error('[MatchScreen] startMatch error:', err));
+          if (matchRef.current) {
+            startMatch(matchRef.current.id).catch(() => {});
+          }
         }, 1000);
       }
     };
@@ -230,8 +299,12 @@ export default function MatchScreen() {
           <View style={styles.waitingWrap}>
             <Text style={styles.waitingTitle}>
               {isChallenger
-                ? match?.challenger_ready ? 'Waiting for opponent...' : 'Tap ready when set!'
-                : match?.opponent_ready ? 'Waiting for challenger...' : 'Tap ready when set!'}
+                ? match?.challenger_ready
+                  ? 'Waiting for opponent...'
+                  : 'Tap ready when set!'
+                : match?.opponent_ready
+                ? 'Waiting for challenger...'
+                : 'Tap ready when set!'}
             </Text>
           </View>
         )}
@@ -254,17 +327,24 @@ export default function MatchScreen() {
         <View style={[styles.bottomBar, { paddingBottom: insets.bottom + spacing.md }]}>
           {phase === 'waiting' && (
             <TouchableOpacity
-              style={[styles.readyBtn, (isChallenger ? match?.challenger_ready : match?.opponent_ready) ? styles.readyBtnDone : null]}
+              style={[
+                styles.readyBtn,
+                (isChallenger ? match?.challenger_ready : match?.opponent_ready)
+                  ? styles.readyBtnDone
+                  : null,
+              ]}
               onPress={handleReady}
               disabled={isChallenger ? match?.challenger_ready : match?.opponent_ready}
             >
               <Text style={styles.readyBtnText}>
-                {(isChallenger ? match?.challenger_ready : match?.opponent_ready) ? 'READY!' : 'TAP TO READY UP'}
+                {(isChallenger ? match?.challenger_ready : match?.opponent_ready)
+                  ? 'READY!'
+                  : 'TAP TO READY UP'}
               </Text>
             </TouchableOpacity>
           )}
 
-          {phase === 'active' && (
+          {phase === 'active' && __DEV__ && DEV_MODE_MANUAL_COUNT && (
             <TouchableOpacity style={styles.devBtn} onPress={manualIncrement}>
               <Text style={styles.devBtnText}>TAP TO COUNT REP</Text>
             </TouchableOpacity>
