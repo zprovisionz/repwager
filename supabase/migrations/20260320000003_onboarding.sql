@@ -1,0 +1,2 @@
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS dob date;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS geo_region text;

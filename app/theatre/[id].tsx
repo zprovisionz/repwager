@@ -1,0 +1,694 @@
+import { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  TextInput,
+} from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
+import { colors, typography, spacing, radius } from '@/lib/theme';
+import { useAuthStore } from '@/stores/authStore';
+import { useToastStore } from '@/stores/toastStore';
+import { getMatch } from '@/services/match.service';
+import { getProfile } from '@/services/profile.service';
+import { fileDisputeWithEvidence } from '@/services/dispute.service';
+import {
+  ChevronLeft,
+  Trophy,
+  AlertTriangle,
+  Zap,
+  Clock,
+  Coins,
+  Play,
+  Pause,
+} from 'lucide-react-native';
+import Avatar from '@/components/Avatar';
+import Button from '@/components/ui/Button';
+import RepTimeline from '@/components/RepTimeline';
+import type { Match, Profile } from '@/types/database';
+import { EXERCISE_LABELS } from '@/lib/config';
+import { supabase } from '@/lib/supabase';
+
+const SPEED_OPTIONS = [0.25, 0.5, 1.0] as const;
+type SpeedOption = (typeof SPEED_OPTIONS)[number];
+
+export default function CourtroomScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { session } = useAuthStore();
+  const { show: showToast } = useToastStore();
+
+  const [match, setMatch] = useState<Match | null>(null);
+  const [challenger, setChallenger] = useState<Profile | null>(null);
+  const [opponent, setOpponent] = useState<Profile | null>(null);
+  const [challengerVideoUri, setChallengerVideoUri] = useState<string | null>(null);
+  const [opponentVideoUri, setOpponentVideoUri] = useState<string | null>(null);
+
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [speed, setSpeed] = useState<SpeedOption>(1.0);
+  const [positionMs, setPositionMs] = useState(0);
+  const [durationMs, setDurationMs] = useState(0);
+
+  const challengerVideoRef = useRef<Video>(null);
+  const opponentVideoRef = useRef<Video>(null);
+
+  const [showDispute, setShowDispute] = useState(false);
+  const [disputeReason, setDisputeReason] = useState('');
+  const [disputing, setDisputing] = useState(false);
+
+  useEffect(() => {
+    if (!id) return;
+    loadMatch();
+  }, [id]);
+
+  async function loadMatch() {
+    try {
+      const m = await getMatch(id!);
+      if (!m) return;
+      setMatch(m);
+      const duration = (m.duration_seconds ?? 60) * 1000;
+      setDurationMs(duration);
+
+      const [c, o] = await Promise.all([
+        getProfile(m.challenger_id).catch(() => null),
+        m.opponent_id ? getProfile(m.opponent_id).catch(() => null) : Promise.resolve(null),
+      ]);
+      setChallenger(c);
+      setOpponent(o);
+
+      if (m.challenger_video_path) {
+        const { data } = supabase.storage
+          .from('match-videos')
+          .getPublicUrl(m.challenger_video_path);
+        setChallengerVideoUri(data.publicUrl);
+      }
+      if (m.opponent_video_path) {
+        const { data } = supabase.storage
+          .from('match-videos')
+          .getPublicUrl(m.opponent_video_path);
+        setOpponentVideoUri(data.publicUrl);
+      }
+    } catch {}
+  }
+
+  const togglePlayback = useCallback(async () => {
+    try {
+      if (isPlaying) {
+        await challengerVideoRef.current?.pauseAsync();
+        await opponentVideoRef.current?.pauseAsync();
+      } else {
+        await challengerVideoRef.current?.playAsync();
+        await opponentVideoRef.current?.playAsync();
+      }
+      setIsPlaying((p) => !p);
+    } catch {}
+  }, [isPlaying]);
+
+  const handleSpeedChange = useCallback(async (s: SpeedOption) => {
+    setSpeed(s);
+    try {
+      await challengerVideoRef.current?.setRateAsync(s, true);
+      await opponentVideoRef.current?.setRateAsync(s, true);
+    } catch {}
+  }, []);
+
+  const handleSeek = useCallback(async (ms: number) => {
+    setPositionMs(ms);
+    try {
+      await challengerVideoRef.current?.setPositionAsync(ms);
+      await opponentVideoRef.current?.setPositionAsync(ms);
+    } catch {}
+  }, []);
+
+  function handleChallengerStatus(status: AVPlaybackStatus) {
+    if (!status.isLoaded) return;
+    if (status.positionMillis !== undefined) {
+      setPositionMs(status.positionMillis);
+    }
+    if (status.durationMillis && status.durationMillis > 0) {
+      setDurationMs(status.durationMillis);
+    }
+  }
+
+  async function handleDispute() {
+    if (!disputeReason.trim() || !match || !session?.user) return;
+    setDisputing(true);
+    try {
+      await fileDisputeWithEvidence({
+        matchId: match.id,
+        reason: disputeReason.trim(),
+        challengerVideoPath: match.challenger_video_path,
+        opponentVideoPath: match.opponent_video_path,
+        challengerRepEvents: match.challenger_rep_events,
+        opponentRepEvents: match.opponent_rep_events,
+        submittedBy: session.user.id,
+      });
+      showToast({ type: 'warning', title: 'Dispute filed', message: 'Our team will review shortly.' });
+      setShowDispute(false);
+      loadMatch();
+    } catch {
+      showToast({ type: 'error', title: 'Could not file dispute' });
+    } finally {
+      setDisputing(false);
+    }
+  }
+
+  const isParticipant =
+    match &&
+    session?.user &&
+    (match.challenger_id === session.user.id || match.opponent_id === session.user.id);
+  const canDispute = match?.status === 'completed' && isParticipant;
+  const hasVideos = challengerVideoUri || opponentVideoUri;
+
+  const challengerRepEvents = match?.challenger_rep_events ?? [];
+  const opponentRepEvents = match?.opponent_rep_events ?? [];
+
+  return (
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      <View style={styles.topBar}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <ChevronLeft size={24} color={colors.textSecondary} />
+        </TouchableOpacity>
+        <Text style={styles.title}>COURTROOM</Text>
+        <View style={{ width: 40 }} />
+      </View>
+
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        {match ? (
+          <>
+            <View style={styles.vsRow}>
+              <View style={styles.playerChip}>
+                <Avatar
+                  gender={challenger?.avatar_gender ?? 'male'}
+                  head={challenger?.avatar_head}
+                  torso={challenger?.avatar_torso}
+                  legs={challenger?.avatar_legs}
+                  size={44}
+                />
+                <View>
+                  <Text style={styles.playerName}>{challenger?.display_name ?? '---'}</Text>
+                  <Text style={styles.playerReps}>
+                    {match.challenger_reps} reps
+                    {match.winner_id === match.challenger_id && (
+                      <Text style={styles.winnerTag}> 🏆</Text>
+                    )}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.vsBlock}>
+                <Text style={styles.vs}>VS</Text>
+                <View style={styles.wagerRow}>
+                  <Coins size={12} color={colors.accent} />
+                  <Text style={styles.wagerText}>{Math.round(match.wager_amount)} RC</Text>
+                </View>
+              </View>
+
+              <View style={[styles.playerChip, styles.playerChipRight]}>
+                <View style={styles.playerChipTextRight}>
+                  <Text style={[styles.playerName, styles.textRight]}>
+                    {opponent?.display_name ?? 'Waiting...'}
+                  </Text>
+                  <Text style={[styles.playerReps, styles.textRight]}>
+                    {match.opponent_reps} reps
+                    {match.winner_id === match.opponent_id && (
+                      <Text style={styles.winnerTag}> 🏆</Text>
+                    )}
+                  </Text>
+                </View>
+                <Avatar
+                  gender={opponent?.avatar_gender ?? 'male'}
+                  head={opponent?.avatar_head}
+                  torso={opponent?.avatar_torso}
+                  legs={opponent?.avatar_legs}
+                  size={44}
+                />
+              </View>
+            </View>
+
+            {hasVideos ? (
+              <View style={styles.videoSection}>
+                <View style={styles.videoRow}>
+                  <View style={styles.videoWrapper}>
+                    <Text style={styles.videoLabel}>
+                      {challenger?.display_name?.split(' ')[0] ?? 'Challenger'}
+                    </Text>
+                    {challengerVideoUri ? (
+                      <Video
+                        ref={challengerVideoRef}
+                        source={{ uri: challengerVideoUri }}
+                        style={styles.video}
+                        resizeMode={ResizeMode.COVER}
+                        rate={speed}
+                        onPlaybackStatusUpdate={handleChallengerStatus}
+                        shouldPlay={false}
+                        isLooping={false}
+                        useNativeControls={false}
+                      />
+                    ) : (
+                      <View style={styles.videoPlaceholder}>
+                        <Text style={styles.videoPlaceholderText}>No video</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  <View style={styles.videoWrapper}>
+                    <Text style={styles.videoLabel}>
+                      {opponent?.display_name?.split(' ')[0] ?? 'Opponent'}
+                    </Text>
+                    {opponentVideoUri ? (
+                      <Video
+                        ref={opponentVideoRef}
+                        source={{ uri: opponentVideoUri }}
+                        style={styles.video}
+                        resizeMode={ResizeMode.COVER}
+                        rate={speed}
+                        shouldPlay={false}
+                        isLooping={false}
+                        useNativeControls={false}
+                      />
+                    ) : (
+                      <View style={styles.videoPlaceholder}>
+                        <Text style={styles.videoPlaceholderText}>No video</Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+
+                <View style={styles.controls}>
+                  <TouchableOpacity style={styles.playBtn} onPress={togglePlayback}>
+                    {isPlaying ? (
+                      <Pause size={22} color={colors.bg} />
+                    ) : (
+                      <Play size={22} color={colors.bg} />
+                    )}
+                  </TouchableOpacity>
+
+                  <View style={styles.speedRow}>
+                    {SPEED_OPTIONS.map((s) => (
+                      <TouchableOpacity
+                        key={s}
+                        style={[styles.speedBtn, speed === s && styles.speedBtnActive]}
+                        onPress={() => handleSpeedChange(s)}
+                      >
+                        <Text style={[styles.speedText, speed === s && styles.speedTextActive]}>
+                          {s}×
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.noVideoCard}>
+                <Zap size={24} color={colors.textMuted} />
+                <Text style={styles.noVideoText}>No video submitted for this match</Text>
+              </View>
+            )}
+
+            {challengerRepEvents.length > 0 && (
+              <View style={styles.timelineCard}>
+                <Text style={styles.timelineTitle}>REP TIMELINE</Text>
+                <RepTimeline
+                  repEvents={challengerRepEvents}
+                  durationMs={durationMs}
+                  currentPositionMs={positionMs}
+                  onSeek={handleSeek}
+                  label={`${challenger?.display_name?.split(' ')[0] ?? 'Challenger'}`}
+                  tintColor={colors.primary}
+                />
+                {opponentRepEvents.length > 0 && (
+                  <View style={styles.timelineGap}>
+                    <RepTimeline
+                      repEvents={opponentRepEvents}
+                      durationMs={durationMs}
+                      currentPositionMs={positionMs}
+                      onSeek={handleSeek}
+                      label={`${opponent?.display_name?.split(' ')[0] ?? 'Opponent'}`}
+                      tintColor={colors.secondary}
+                    />
+                  </View>
+                )}
+              </View>
+            )}
+
+            <View style={styles.detailsCard}>
+              <View style={styles.detailRow}>
+                <Zap size={16} color={colors.primary} />
+                <Text style={styles.detailLabel}>Exercise</Text>
+                <Text style={styles.detailValue}>{EXERCISE_LABELS[match.exercise_type]}</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Clock size={16} color={colors.textSecondary} />
+                <Text style={styles.detailLabel}>Duration</Text>
+                <Text style={styles.detailValue}>{match.duration_seconds}s</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Coins size={16} color={colors.accent} />
+                <Text style={styles.detailLabel}>Wager</Text>
+                <Text style={styles.detailValue}>{Math.round(match.wager_amount)} RepCoins</Text>
+              </View>
+              {match.completed_at && (
+                <View style={styles.detailRow}>
+                  <Clock size={16} color={colors.textMuted} />
+                  <Text style={styles.detailLabel}>Completed</Text>
+                  <Text style={styles.detailValue}>{new Date(match.completed_at).toLocaleString()}</Text>
+                </View>
+              )}
+            </View>
+
+            {match.status === 'disputed' && (
+              <View style={styles.disputeCard}>
+                <AlertTriangle size={20} color={colors.warning} />
+                <Text style={styles.disputeTitle}>Dispute Filed</Text>
+                <Text style={styles.disputeReason}>{match.dispute_reason}</Text>
+              </View>
+            )}
+
+            {canDispute && !showDispute && match.status !== 'disputed' && (
+              <TouchableOpacity style={styles.disputeBtn} onPress={() => setShowDispute(true)}>
+                <AlertTriangle size={16} color={colors.warning} />
+                <Text style={styles.disputeBtnText}>File Dispute</Text>
+              </TouchableOpacity>
+            )}
+
+            {showDispute && (
+              <View style={styles.disputeForm}>
+                <Text style={styles.disputeFormTitle}>Describe the issue</Text>
+                <TextInput
+                  style={styles.disputeInput}
+                  value={disputeReason}
+                  onChangeText={setDisputeReason}
+                  placeholder="What went wrong with this match?"
+                  placeholderTextColor={colors.textMuted}
+                  multiline
+                  numberOfLines={4}
+                />
+                <View style={styles.disputeActions}>
+                  <Button label="Cancel" variant="ghost" onPress={() => setShowDispute(false)} size="sm" />
+                  <Button
+                    label="Submit Dispute"
+                    variant="danger"
+                    onPress={handleDispute}
+                    loading={disputing}
+                    size="sm"
+                  />
+                </View>
+              </View>
+            )}
+          </>
+        ) : (
+          <View style={styles.loading}>
+            <Text style={styles.loadingText}>Loading match...</Text>
+          </View>
+        )}
+      </ScrollView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.bg },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  title: {
+    fontFamily: typography.fontDisplay,
+    fontSize: 16,
+    color: colors.text,
+    letterSpacing: 3,
+  },
+  scroll: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    gap: spacing.md,
+    paddingBottom: 80,
+  },
+  vsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.lg,
+    padding: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: spacing.xs,
+  },
+  playerChip: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  playerChipRight: {
+    justifyContent: 'flex-end',
+  },
+  playerChipTextRight: {
+    alignItems: 'flex-end',
+  },
+  playerName: {
+    fontFamily: typography.fontBodyBold,
+    fontSize: 13,
+    color: colors.text,
+  },
+  playerReps: {
+    fontFamily: typography.fontBody,
+    fontSize: 12,
+    color: colors.textSecondary,
+  },
+  textRight: { textAlign: 'right' },
+  winnerTag: { color: colors.accent },
+  vsBlock: { alignItems: 'center', gap: 2 },
+  vs: {
+    fontFamily: typography.fontDisplay,
+    fontSize: 14,
+    color: colors.textMuted,
+    letterSpacing: 2,
+  },
+  wagerRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  wagerText: {
+    fontFamily: typography.fontDisplayMedium,
+    fontSize: 12,
+    color: colors.accent,
+  },
+  videoSection: {
+    gap: spacing.sm,
+  },
+  videoRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  videoWrapper: {
+    flex: 1,
+    gap: 4,
+  },
+  videoLabel: {
+    fontFamily: typography.fontBodyMedium,
+    fontSize: 11,
+    color: colors.textMuted,
+    textAlign: 'center',
+    letterSpacing: 0.5,
+  },
+  video: {
+    width: '100%',
+    aspectRatio: 9 / 16,
+    borderRadius: radius.md,
+    backgroundColor: '#000',
+  },
+  videoPlaceholder: {
+    width: '100%',
+    aspectRatio: 9 / 16,
+    borderRadius: radius.md,
+    backgroundColor: colors.bgCard,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  videoPlaceholderText: {
+    fontFamily: typography.fontBody,
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+  controls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  playBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  speedRow: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  speedBtn: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.sm,
+    backgroundColor: colors.bgElevated,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  speedBtnActive: {
+    backgroundColor: colors.primary + '22',
+    borderColor: colors.primary,
+  },
+  speedText: {
+    fontFamily: typography.fontBodyMedium,
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+  speedTextActive: { color: colors.primary },
+  noVideoCard: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  noVideoText: {
+    fontFamily: typography.fontBody,
+    fontSize: 13,
+    color: colors.textMuted,
+  },
+  timelineCard: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: spacing.sm,
+  },
+  timelineTitle: {
+    fontFamily: typography.fontDisplayMedium,
+    fontSize: 11,
+    color: colors.textMuted,
+    letterSpacing: 2,
+  },
+  timelineGap: { marginTop: spacing.sm },
+  detailsCard: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: spacing.sm,
+  },
+  detailRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  detailLabel: {
+    flex: 1,
+    fontFamily: typography.fontBody,
+    fontSize: 14,
+    color: colors.textSecondary,
+  },
+  detailValue: {
+    fontFamily: typography.fontBodyBold,
+    fontSize: 14,
+    color: colors.text,
+  },
+  disputeCard: {
+    backgroundColor: 'rgba(255,140,0,0.08)',
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.warning,
+    gap: spacing.xs,
+    alignItems: 'center',
+  },
+  disputeTitle: {
+    fontFamily: typography.fontBodyBold,
+    fontSize: 14,
+    color: colors.warning,
+  },
+  disputeReason: {
+    fontFamily: typography.fontBody,
+    fontSize: 13,
+    color: colors.textSecondary,
+    textAlign: 'center',
+  },
+  disputeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.warning,
+    backgroundColor: 'rgba(255,140,0,0.08)',
+  },
+  disputeBtnText: {
+    fontFamily: typography.fontBodyBold,
+    fontSize: 14,
+    color: colors.warning,
+  },
+  disputeForm: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: spacing.md,
+  },
+  disputeFormTitle: {
+    fontFamily: typography.fontBodyBold,
+    fontSize: 14,
+    color: colors.text,
+  },
+  disputeInput: {
+    backgroundColor: colors.bgElevated,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    color: colors.text,
+    fontFamily: typography.fontBody,
+    fontSize: 14,
+    minHeight: 100,
+    textAlignVertical: 'top',
+    borderWidth: 1.5,
+    borderColor: colors.border,
+  },
+  disputeActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.sm },
+  loading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.xxl,
+  },
+  loadingText: {
+    fontFamily: typography.fontBody,
+    fontSize: 16,
+    color: colors.textMuted,
+  },
+});
