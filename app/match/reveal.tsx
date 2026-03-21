@@ -20,25 +20,28 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { colors, typography, spacing, radius } from '@/lib/theme';
+import { BarlowText } from '@/components/ui/BarlowText';
 import { useAuthStore } from '@/stores/authStore';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Trophy, Frown, Film, Share2, RotateCcw } from 'lucide-react-native';
 import ViewShot from 'react-native-view-shot';
 import ShareCard from '@/components/ShareCard';
 import { generateShareCard, shareImage } from '@/services/share.service';
-import { getRankTier } from '@/services/elo.service';
 import type { RefObject } from 'react';
+import { RANK_TIER_COLORS, RANK_TIER_TAGLINES, RANK_TIERS, type RankTier } from '@/types/database';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
 const CONFETTI_COLORS = ['#00D4FF', '#FF2D78', '#FFB800', '#00FF88', '#A78BFA'];
-const RANK_UP_TIERS: Record<string, { label: string; tagline: string; color: string }> = {
-  rookie:       { label: 'ROOKIE',        tagline: 'Every legend starts here.',         color: '#8A9DC0' },
-  intermediate: { label: 'INTERMEDIATE',  tagline: 'Building momentum.',                color: '#22C55E' },
-  advanced:     { label: 'ADVANCED',      tagline: 'Form is sharpening.',               color: '#00D4FF' },
-  elite:        { label: 'ELITE',         tagline: 'Top-tier competitor.',              color: '#A78BFA' },
-  goggins:      { label: 'GOGGINS',       tagline: "Can't hurt me.",                    color: '#FFB800' },
-};
+function rankUpSplashInfo(tierRaw: string): { label: string; tagline: string; color: string } {
+  const key = RANK_TIERS.find((t) => t.toLowerCase() === tierRaw.trim().toLowerCase());
+  const tier: RankTier = key ?? 'Rookie';
+  return {
+    label: tier.toUpperCase(),
+    tagline: RANK_TIER_TAGLINES[tier],
+    color: RANK_TIER_COLORS[tier],
+  };
+}
 
 interface ConfettiPiece {
   id: number;
@@ -172,7 +175,7 @@ function ScoreCard({
 }
 
 function RankUpSplash({ tier, onDone }: { tier: string; onDone: () => void }) {
-  const info = RANK_UP_TIERS[tier] ?? RANK_UP_TIERS.rookie;
+  const info = rankUpSplashInfo(tier);
   const scale = useSharedValue(0.4);
   const opacity = useSharedValue(0);
 
@@ -381,20 +384,21 @@ export default function RevealScreen() {
               <>
                 <View style={styles.outcomeIcon}>
                   {won ? (
-                    <Trophy size={36} color={colors.accent} />
+                    <Trophy size={36} color={colors.success} />
                   ) : (
                     <Frown size={36} color={colors.textMuted} />
                   )}
                 </View>
 
-                <Text
+                <BarlowText
+                  variant="display"
                   style={[
                     styles.outcomeTitle,
-                    { color: won ? colors.accent : colors.textSecondary },
+                    { color: won ? colors.success : colors.error },
                   ]}
                 >
-                  {won ? 'YOU WON!' : 'YOU LOST'}
-                </Text>
+                  {won ? 'VICTORY' : 'DEFEAT'}
+                </BarlowText>
 
                 {!won && (
                   <Text style={styles.lossLine}>

@@ -104,7 +104,7 @@ export async function recordMaskAndUpload(
     });
 
     // Register video path in match_videos table
-    await supabase.from('match_videos').upsert(
+    await (supabase.from('match_videos') as any).upsert(
       { match_id: matchId, user_id: userId, storage_path: storagePath },
       { onConflict: 'match_id,user_id' }
     );

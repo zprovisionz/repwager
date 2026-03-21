@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, typography, spacing, radius } from '@/lib/theme';
+import { BarlowText } from '@/components/ui/BarlowText';
+import { StatStrip } from '@/components/ui/StatStrip';
 import { useAuthStore } from '@/stores/authStore';
 import { useToastStore } from '@/stores/toastStore';
 import { signOut } from '@/services/auth.service';
@@ -10,10 +12,16 @@ import { getTransactions } from '@/services/profile.service';
 import { AVATAR_CLOTHING } from '@/lib/config';
 import Avatar from '@/components/Avatar';
 import { updateProfile } from '@/services/profile.service';
+import { getUserPersonalBestReps } from '@/services/match.service';
+import { getRankTier, getEloProgress, getRankTierTagline } from '@/services/elo.service';
+import { RANK_TIER_COLORS, type RankTier } from '@/types/database';
+import { getUserMatches } from '@/services/match.service';
+import { playerAnonLabel } from '@/lib/theatreAnon';
+import type { Match } from '@/types/database';
 import { useFreeze, checkStreakStatus } from '@/services/streak.service';
 import {
-  Trophy, Zap, Flame, Star, LogOut,
-  Target, Award, Snowflake
+  Flame, Star, LogOut,
+  Award, Snowflake, Lock,
 } from 'lucide-react-native';
 import type { Badge, UserBadge, Transaction } from '@/types/database';
 
@@ -32,16 +40,23 @@ export default function ProfileScreen() {
   const [selectedLegs, setSelectedLegs] = useState(profile?.avatar_legs ?? 'legs_default');
   const [savingAvatar, setSavingAvatar] = useState(false);
   const [usingFreeze, setUsingFreeze] = useState(false);
+  const [personalBest, setPersonalBest] = useState(0);
+  const [recentMatches, setRecentMatches] = useState<Match[]>([]);
 
   async function load() {
     if (!session?.user) return;
     try {
-      const [b, t] = await Promise.all([
+      const [b, t, pb, allMatches] = await Promise.all([
         getUserBadges(session.user.id),
         getTransactions(session.user.id),
+        getUserPersonalBestReps(session.user.id),
+        getUserMatches(session.user.id, 'all'),
       ]);
       setBadges(b);
       setTransactions(t);
+      setPersonalBest(pb);
+      const done = allMatches.filter((m) => m.status === 'completed').slice(0, 8);
+      setRecentMatches(done);
     } catch {}
   }
 
@@ -107,6 +122,11 @@ export default function ProfileScreen() {
   const gender = profile?.avatar_gender ?? 'male';
   const clothing = AVATAR_CLOTHING[gender];
 
+  const elo = (profile as any)?.elo ?? 1000;
+  const tier = getRankTier(elo) as RankTier;
+  const eloProgress = getEloProgress(elo);
+  const tierColor = RANK_TIER_COLORS[tier] ?? colors.primary;
+
   return (
     <ScrollView
       style={styles.container}
@@ -122,8 +142,12 @@ export default function ProfileScreen() {
           legs={selectedLegs}
           size={100}
         />
-        <Text style={styles.displayName}>{profile?.display_name}</Text>
-        <Text style={styles.username}>@{profile?.username}</Text>
+        <BarlowText variant="display" style={styles.displayName}>
+          {profile?.display_name}
+        </BarlowText>
+        <BarlowText variant="body" color={colors.textSecondary} style={styles.username}>
+          @{profile?.username}
+        </BarlowText>
         <View style={styles.xpRow}>
           <Star size={14} color={colors.accent} />
           <Text style={styles.xp}>{(profile?.total_xp ?? 0).toLocaleString()} XP</Text>
@@ -140,12 +164,96 @@ export default function ProfileScreen() {
 
       {tab === 'stats' && (
         <View style={styles.section}>
-          <View style={styles.statsGrid}>
+          <View style={styles.eloCard}>
+            <View style={styles.eloCardHeader}>
+              <BarlowText variant="displayMedium" style={styles.eloBig}>
+                {elo}
+              </BarlowText>
+              <View style={styles.eloMeta}>
+                <BarlowText variant="label" color={colors.textMuted}>
+                  ELO
+                </BarlowText>
+                <BarlowText variant="bodyBold" style={{ color: tierColor }}>
+                  {tier}
+                </BarlowText>
+              </View>
+            </View>
+            <View style={styles.eloBarTrack}>
+              <View style={[styles.eloBarFill, { width: `${eloProgress.pct}%`, backgroundColor: tierColor }]} />
+            </View>
+            <Text style={styles.eloBarCaption}>
+              {eloProgress.nextAt === null
+                ? `${tier} — peak tier`
+                : `Progress toward ${eloProgress.nextAt} ELO · ${getRankTierTagline(tier)}`}
+            </Text>
+
+            <View style={styles.chartPlaceholder}>
+              <BarlowText variant="label" color={colors.textMuted}>
+                ELO history
+              </BarlowText>
+              <Text style={styles.chartPlaceholderText}>
+                Bar chart will graph your last 10 ranked swings once history is persisted.
+              </Text>
+            </View>
+
+            <View style={styles.pbGrid}>
+              <View style={styles.pbCell}>
+                <Text style={styles.pbGhost}>PU</Text>
+                <BarlowText variant="body" color={colors.textSecondary}>
+                  Push-ups PB
+                </BarlowText>
+                <BarlowText variant="displayMedium" style={styles.pbVal}>
+                  {personalBest} reps
+                </BarlowText>
+              </View>
+              <View style={[styles.pbCell, styles.pbCellLocked]}>
+                <Text style={styles.pbGhost}>SQ</Text>
+                <BarlowText variant="body" color={colors.textSecondary}>
+                  Squats PB
+                </BarlowText>
+                <View style={styles.lockedRow}>
+                  <Lock size={14} color={colors.textMuted} />
+                  <Text style={styles.lockedPb}>Locked at launch</Text>
+                </View>
+              </View>
+            </View>
+          </View>
+
+          <StatStrip
+            items={[
+              { label: 'Wins', value: profile?.wins ?? 0 },
+              { label: 'Losses', value: profile?.losses ?? 0 },
+              { label: 'Total reps', value: (profile?.total_reps ?? 0).toLocaleString() },
+              { label: 'Win rate', value: `${winRate}%` },
+            ]}
+          />
+
+          {recentMatches.length > 0 && (
+            <View style={styles.historySection}>
+              <BarlowText variant="label" color={colors.textMuted} style={styles.historyTitle}>
+                Recent matches
+              </BarlowText>
+              {recentMatches.map((m) => {
+                const uid = session?.user?.id;
+                const oppId =
+                  uid && m.challenger_id === uid ? m.opponent_id : m.challenger_id;
+                const label = oppId ? playerAnonLabel(oppId) : 'Opponent';
+                const won = uid && m.winner_id === uid;
+                const delta = won ? '+ELO' : '−ELO';
+                return (
+                  <View key={m.id} style={styles.historyRow}>
+                    <Text style={styles.historyVs}>
+                      {won ? 'WIN' : 'LOSS'} vs {label}
+                    </Text>
+                    <Text style={styles.historyMeta}>{delta} · casual/wager</Text>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+
+          <View style={[styles.statsGrid, { marginTop: spacing.md }]}>
             {[
-              { icon: <Trophy size={18} color={colors.accent} />, label: 'Wins', value: profile?.wins ?? 0 },
-              { icon: <Target size={18} color={colors.error} />, label: 'Losses', value: profile?.losses ?? 0 },
-              { icon: <Zap size={18} color={colors.primary} />, label: 'Total Reps', value: (profile?.total_reps ?? 0).toLocaleString() },
-              { icon: <Flame size={18} color={colors.secondary} />, label: 'Win Rate', value: `${winRate}%` },
               {
                 icon: (
                   <Flame
@@ -226,7 +334,9 @@ export default function ProfileScreen() {
           <Text style={styles.rcDisclaimer}>
             RepCoins are virtual in-app currency with no cash value and cannot be exchanged for real money.
           </Text>
-          <Text style={styles.sectionTitle}>TRANSACTION HISTORY</Text>
+          <BarlowText variant="label" color={colors.textMuted} style={styles.sectionTitle}>
+            Transaction history
+          </BarlowText>
           {transactions.length === 0 ? (
             <View style={styles.empty}>
               <Text style={styles.emptyText}>No transactions yet.</Text>
@@ -307,8 +417,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  displayName: { fontFamily: typography.fontDisplay, fontSize: 22, color: colors.text, letterSpacing: 0.5, marginTop: spacing.sm },
-  username: { fontFamily: typography.fontBody, fontSize: 14, color: colors.textSecondary },
+  displayName: { fontSize: 22, color: colors.text, letterSpacing: 0.5, marginTop: spacing.sm },
+  username: { fontSize: 14 },
   xpRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.xs },
   xp: { fontFamily: typography.fontBodyMedium, fontSize: 14, color: colors.accent },
   tabRow: {
@@ -325,6 +435,96 @@ const styles = StyleSheet.create({
   tabBtnText: { fontFamily: typography.fontBodyMedium, fontSize: 12, color: colors.textSecondary },
   tabBtnTextActive: { color: colors.textInverse },
   section: { paddingHorizontal: spacing.md },
+  eloCard: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.md,
+    gap: spacing.sm,
+  },
+  eloCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  eloBig: { fontSize: 36, color: colors.text },
+  eloMeta: { alignItems: 'flex-end', gap: 2 },
+  eloBarTrack: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.bgElevated,
+    overflow: 'hidden',
+  },
+  eloBarFill: {
+    height: '100%',
+    borderRadius: 4,
+    backgroundColor: colors.primary,
+  },
+  eloBarCaption: {
+    fontFamily: typography.fontBody,
+    fontSize: 11,
+    color: colors.textMuted,
+  },
+  pbRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: spacing.sm,
+    paddingTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSubtle,
+  },
+  pbVal: { fontSize: 18, color: colors.success },
+  chartPlaceholder: {
+    marginTop: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: colors.border,
+    gap: 4,
+  },
+  chartPlaceholderText: {
+    fontFamily: typography.fontBody,
+    fontSize: 12,
+    color: colors.textMuted,
+    lineHeight: 18,
+  },
+  pbGrid: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  pbCell: {
+    flex: 1,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.bgElevated,
+    gap: 4,
+  },
+  pbCellLocked: { opacity: 0.75 },
+  pbGhost: {
+    fontFamily: typography.fontDisplay,
+    fontSize: 22,
+    color: colors.textMuted,
+    opacity: 0.35,
+    letterSpacing: 2,
+  },
+  lockedRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+  lockedPb: { fontFamily: typography.fontBody, fontSize: 12, color: colors.textMuted },
+  historySection: { marginTop: spacing.md, gap: spacing.xs },
+  historyTitle: { marginBottom: spacing.xs },
+  historyRow: {
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSubtle,
+  },
+  historyVs: { fontFamily: typography.fontBodyBold, fontSize: 13, color: colors.text },
+  historyMeta: { fontFamily: typography.fontBody, fontSize: 11, color: colors.textMuted, marginTop: 2 },
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -374,9 +574,7 @@ const styles = StyleSheet.create({
   balanceBig: { fontFamily: typography.fontDisplay, fontSize: 40, color: colors.accent },
   balanceSub: { fontFamily: typography.fontBody, fontSize: 13, color: colors.textMuted },
   sectionTitle: {
-    fontFamily: typography.fontBodyMedium,
     fontSize: 11,
-    color: colors.textMuted,
     letterSpacing: 2,
     marginBottom: spacing.sm,
   },

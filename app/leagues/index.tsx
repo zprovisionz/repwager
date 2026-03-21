@@ -10,7 +10,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { colors, typography, spacing, radius } from '@/lib/theme';
+import { Colors } from '@/constants/theme';
 import { useAuthStore } from '@/stores/authStore';
+
+const LEAGUE_PURPLE = Colors.accent.purple;
 import { getPublicLeagues, getMyLeagues } from '@/services/league.service';
 import type { League } from '@/services/league.service';
 import { Users, Plus, Globe, Lock, ChevronRight, Zap } from 'lucide-react-native';
@@ -27,7 +30,7 @@ function LeagueCard({ league, onPress }: { league: League; onPress: () => void }
       <View style={styles.card}>
         <View style={styles.cardLeft}>
           <View style={styles.cardIcon}>
-            <Zap size={20} color={colors.primary} />
+            <Zap size={20} color={LEAGUE_PURPLE} />
           </View>
           <View style={styles.cardInfo}>
             <Text style={styles.cardName}>{league.name}</Text>
@@ -93,11 +96,14 @@ export default function LeaguesScreen() {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <Users size={20} color={colors.primary} />
+          <Users size={20} color={LEAGUE_PURPLE} />
           <Text style={styles.headerTitle}>LEAGUES</Text>
+          <TouchableOpacity onPress={() => router.push('/leagues/war')} style={styles.warLink}>
+            <Text style={styles.warLinkText}>Wars</Text>
+          </TouchableOpacity>
         </View>
         <TouchableOpacity
-          style={styles.createBtn}
+          style={[styles.createBtn, { backgroundColor: LEAGUE_PURPLE }]}
           onPress={() => router.push('/leagues/create')}
         >
           <Plus size={16} color={colors.bg} />
@@ -130,7 +136,7 @@ export default function LeaguesScreen() {
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={LEAGUE_PURPLE} />
         }
       >
         {!loading && displayed.length === 0 ? (
@@ -191,11 +197,25 @@ const styles = StyleSheet.create({
     color: colors.text,
     letterSpacing: 3,
   },
+  warLink: {
+    marginLeft: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: LEAGUE_PURPLE + '44',
+    backgroundColor: Colors.accent.purpleDim,
+  },
+  warLinkText: {
+    fontFamily: typography.fontBodyBold,
+    fontSize: 15,
+    color: LEAGUE_PURPLE,
+    letterSpacing: 1,
+  },
   createBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: colors.primary,
     borderRadius: radius.sm,
     paddingHorizontal: spacing.sm,
     paddingVertical: 6,
@@ -223,7 +243,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm - 2,
     borderRadius: radius.md,
   },
-  tabBtnActive: { backgroundColor: colors.primary },
+  tabBtnActive: { backgroundColor: LEAGUE_PURPLE },
   tabText: {
     fontFamily: typography.fontBodyMedium,
     fontSize: 13,
@@ -251,11 +271,11 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: colors.primary + '1A',
+    backgroundColor: LEAGUE_PURPLE + '22',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: colors.primary + '44',
+    borderColor: LEAGUE_PURPLE + '55',
   },
   cardInfo: { flex: 1, gap: 4 },
   cardName: {
@@ -311,7 +331,7 @@ const styles = StyleSheet.create({
   },
   emptyBtn: {
     marginTop: spacing.sm,
-    backgroundColor: colors.primary,
+    backgroundColor: LEAGUE_PURPLE,
     borderRadius: radius.md,
     paddingVertical: spacing.sm + 2,
     paddingHorizontal: spacing.lg,

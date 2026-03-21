@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,6 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { colors, typography, spacing, radius } from '@/lib/theme';
 import { useAuthStore } from '@/stores/authStore';
 import { useToastStore } from '@/stores/toastStore';
@@ -31,7 +30,13 @@ import Button from '@/components/ui/Button';
 import RepTimeline from '@/components/RepTimeline';
 import type { Match, Profile } from '@/types/database';
 import { EXERCISE_LABELS } from '@/lib/config';
-import { supabase } from '@/lib/supabase';
+import { playerAnonLabel } from '@/lib/theatreAnon';
+import {
+  fetchTheatreReactions,
+  addTheatreReaction,
+  fetchTheatreComments,
+  addTheatreComment,
+} from '@/services/theatreSocial.service';
 
 const SPEED_OPTIONS = [0.25, 0.5, 1.0] as const;
 type SpeedOption = (typeof SPEED_OPTIONS)[number];
@@ -46,25 +51,42 @@ export default function CourtroomScreen() {
   const [match, setMatch] = useState<Match | null>(null);
   const [challenger, setChallenger] = useState<Profile | null>(null);
   const [opponent, setOpponent] = useState<Profile | null>(null);
-  const [challengerVideoUri, setChallengerVideoUri] = useState<string | null>(null);
-  const [opponentVideoUri, setOpponentVideoUri] = useState<string | null>(null);
-
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState<SpeedOption>(1.0);
   const [positionMs, setPositionMs] = useState(0);
   const [durationMs, setDurationMs] = useState(0);
 
-  const challengerVideoRef = useRef<Video>(null);
-  const opponentVideoRef = useRef<Video>(null);
-
   const [showDispute, setShowDispute] = useState(false);
   const [disputeReason, setDisputeReason] = useState('');
   const [disputing, setDisputing] = useState(false);
+  const [reactions, setReactions] = useState<any[]>([]);
+  const [comments, setComments] = useState<any[]>([]);
+  const [commentDraft, setCommentDraft] = useState('');
+  const [socialLoading, setSocialLoading] = useState(false);
 
   useEffect(() => {
     if (!id) return;
     loadMatch();
   }, [id]);
+
+  async function loadSocial() {
+    if (!id) return;
+    try {
+      const [r, c] = await Promise.all([
+        fetchTheatreReactions(id),
+        fetchTheatreComments(id),
+      ]);
+      setReactions(r);
+      setComments(c);
+    } catch {
+      setReactions([]);
+      setComments([]);
+    }
+  }
+
+  useEffect(() => {
+    if (match?.id) loadSocial();
+  }, [match?.id]);
 
   async function loadMatch() {
     try {
@@ -81,59 +103,37 @@ export default function CourtroomScreen() {
       setChallenger(c);
       setOpponent(o);
 
-      if (m.challenger_video_path) {
-        const { data } = supabase.storage
-          .from('match-videos')
-          .getPublicUrl(m.challenger_video_path);
-        setChallengerVideoUri(data.publicUrl);
-      }
-      if (m.opponent_video_path) {
-        const { data } = supabase.storage
-          .from('match-videos')
-          .getPublicUrl(m.opponent_video_path);
-        setOpponentVideoUri(data.publicUrl);
-      }
+      /* Raw video URLs intentionally not used in Theatre UI — trust layer is skeleton + timelines. */
     } catch {}
   }
 
-  const togglePlayback = useCallback(async () => {
-    try {
-      if (isPlaying) {
-        await challengerVideoRef.current?.pauseAsync();
-        await opponentVideoRef.current?.pauseAsync();
-      } else {
-        await challengerVideoRef.current?.playAsync();
-        await opponentVideoRef.current?.playAsync();
-      }
-      setIsPlaying((p) => !p);
-    } catch {}
-  }, [isPlaying]);
+  useEffect(() => {
+    if (!isPlaying) return;
+    const id = setInterval(() => {
+      setPositionMs((p) => {
+        const step = 16 * speed;
+        const next = p + step;
+        if (next >= durationMs) {
+          setIsPlaying(false);
+          return durationMs;
+        }
+        return next;
+      });
+    }, 16);
+    return () => clearInterval(id);
+  }, [isPlaying, speed, durationMs]);
 
-  const handleSpeedChange = useCallback(async (s: SpeedOption) => {
+  const togglePlayback = useCallback(() => {
+    setIsPlaying((p) => !p);
+  }, []);
+
+  const handleSpeedChange = useCallback((s: SpeedOption) => {
     setSpeed(s);
-    try {
-      await challengerVideoRef.current?.setRateAsync(s, true);
-      await opponentVideoRef.current?.setRateAsync(s, true);
-    } catch {}
   }, []);
 
-  const handleSeek = useCallback(async (ms: number) => {
+  const handleSeek = useCallback((ms: number) => {
     setPositionMs(ms);
-    try {
-      await challengerVideoRef.current?.setPositionAsync(ms);
-      await opponentVideoRef.current?.setPositionAsync(ms);
-    } catch {}
   }, []);
-
-  function handleChallengerStatus(status: AVPlaybackStatus) {
-    if (!status.isLoaded) return;
-    if (status.positionMillis !== undefined) {
-      setPositionMs(status.positionMillis);
-    }
-    if (status.durationMillis && status.durationMillis > 0) {
-      setDurationMs(status.durationMillis);
-    }
-  }
 
   async function handleDispute() {
     if (!disputeReason.trim() || !match || !session?.user) return;
@@ -163,10 +163,48 @@ export default function CourtroomScreen() {
     session?.user &&
     (match.challenger_id === session.user.id || match.opponent_id === session.user.id);
   const canDispute = match?.status === 'completed' && isParticipant;
-  const hasVideos = challengerVideoUri || opponentVideoUri;
+  const cLabel =
+    match && isParticipant
+      ? challenger?.display_name ?? 'Challenger'
+      : match
+        ? playerAnonLabel(match.challenger_id)
+        : '—';
+  const oLabel =
+    match && isParticipant
+      ? opponent?.display_name ?? 'Opponent'
+      : match?.opponent_id
+        ? playerAnonLabel(match.opponent_id)
+        : '…';
 
   const challengerRepEvents = match?.challenger_rep_events ?? [];
   const opponentRepEvents = match?.opponent_rep_events ?? [];
+
+  async function onReact(kind: string) {
+    if (!session?.user || !match) return;
+    try {
+      setSocialLoading(true);
+      await addTheatreReaction(match.id, session.user.id, kind);
+      await loadSocial();
+    } catch {
+      showToast({ type: 'error', title: 'Could not react' });
+    } finally {
+      setSocialLoading(false);
+    }
+  }
+
+  async function onSendComment() {
+    if (!session?.user || !match || !commentDraft.trim()) return;
+    try {
+      setSocialLoading(true);
+      await addTheatreComment(match.id, session.user.id, commentDraft);
+      setCommentDraft('');
+      await loadSocial();
+    } catch {
+      showToast({ type: 'error', title: 'Could not post comment' });
+    } finally {
+      setSocialLoading(false);
+    }
+  }
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -174,7 +212,7 @@ export default function CourtroomScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <ChevronLeft size={24} color={colors.textSecondary} />
         </TouchableOpacity>
-        <Text style={styles.title}>COURTROOM</Text>
+        <Text style={styles.title}>THEATRE</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -191,7 +229,7 @@ export default function CourtroomScreen() {
                   size={44}
                 />
                 <View>
-                  <Text style={styles.playerName}>{challenger?.display_name ?? '---'}</Text>
+                  <Text style={styles.playerName}>{cLabel}</Text>
                   <Text style={styles.playerReps}>
                     {match.challenger_reps} reps
                     {match.winner_id === match.challenger_id && (
@@ -211,9 +249,7 @@ export default function CourtroomScreen() {
 
               <View style={[styles.playerChip, styles.playerChipRight]}>
                 <View style={styles.playerChipTextRight}>
-                  <Text style={[styles.playerName, styles.textRight]}>
-                    {opponent?.display_name ?? 'Waiting...'}
-                  </Text>
+                  <Text style={[styles.playerName, styles.textRight]}>{oLabel}</Text>
                   <Text style={[styles.playerReps, styles.textRight]}>
                     {match.opponent_reps} reps
                     {match.winner_id === match.opponent_id && (
@@ -231,85 +267,56 @@ export default function CourtroomScreen() {
               </View>
             </View>
 
-            {hasVideos ? (
-              <View style={styles.videoSection}>
-                <View style={styles.videoRow}>
-                  <View style={styles.videoWrapper}>
-                    <Text style={styles.videoLabel}>
-                      {challenger?.display_name?.split(' ')[0] ?? 'Challenger'}
-                    </Text>
-                    {challengerVideoUri ? (
-                      <Video
-                        ref={challengerVideoRef}
-                        source={{ uri: challengerVideoUri }}
-                        style={styles.video}
-                        resizeMode={ResizeMode.COVER}
-                        rate={speed}
-                        onPlaybackStatusUpdate={handleChallengerStatus}
-                        shouldPlay={false}
-                        isLooping={false}
-                        useNativeControls={false}
-                      />
-                    ) : (
-                      <View style={styles.videoPlaceholder}>
-                        <Text style={styles.videoPlaceholderText}>No video</Text>
-                      </View>
-                    )}
-                  </View>
-
-                  <View style={styles.videoWrapper}>
-                    <Text style={styles.videoLabel}>
-                      {opponent?.display_name?.split(' ')[0] ?? 'Opponent'}
-                    </Text>
-                    {opponentVideoUri ? (
-                      <Video
-                        ref={opponentVideoRef}
-                        source={{ uri: opponentVideoUri }}
-                        style={styles.video}
-                        resizeMode={ResizeMode.COVER}
-                        rate={speed}
-                        shouldPlay={false}
-                        isLooping={false}
-                        useNativeControls={false}
-                      />
-                    ) : (
-                      <View style={styles.videoPlaceholder}>
-                        <Text style={styles.videoPlaceholderText}>No video</Text>
-                      </View>
-                    )}
+            <View style={styles.skeletonSection}>
+              <Zap size={28} color={colors.primary} />
+              <Text style={styles.skeletonTitle}>Theatre playback</Text>
+              <Text style={styles.skeletonBody}>
+                No raw video in Theatre — synced skeleton panes + rep timelines below. Keypoint replay
+                storage can be wired to these panes when available.
+              </Text>
+              <View style={styles.dualSkeleton}>
+                <View style={[styles.skeletonPane, { borderColor: colors.primary + '55' }]}>
+                  <Text style={styles.skeletonPaneLabel}>{cLabel.split(' ')[0] ?? 'P1'}</Text>
+                  <View style={styles.skeletonStickFigure}>
+                    <View style={[styles.skeletonJoint, { backgroundColor: colors.primary }]} />
+                    <View style={styles.skeletonBar} />
+                    <View style={[styles.skeletonJoint, { backgroundColor: colors.primary }]} />
                   </View>
                 </View>
-
-                <View style={styles.controls}>
-                  <TouchableOpacity style={styles.playBtn} onPress={togglePlayback}>
-                    {isPlaying ? (
-                      <Pause size={22} color={colors.bg} />
-                    ) : (
-                      <Play size={22} color={colors.bg} />
-                    )}
-                  </TouchableOpacity>
-
-                  <View style={styles.speedRow}>
-                    {SPEED_OPTIONS.map((s) => (
-                      <TouchableOpacity
-                        key={s}
-                        style={[styles.speedBtn, speed === s && styles.speedBtnActive]}
-                        onPress={() => handleSpeedChange(s)}
-                      >
-                        <Text style={[styles.speedText, speed === s && styles.speedTextActive]}>
-                          {s}×
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
+                <View style={[styles.skeletonPane, { borderColor: colors.secondary + '55' }]}>
+                  <Text style={styles.skeletonPaneLabel}>{oLabel.split(' ')[0] ?? 'P2'}</Text>
+                  <View style={styles.skeletonStickFigure}>
+                    <View style={[styles.skeletonJoint, { backgroundColor: colors.secondary }]} />
+                    <View style={styles.skeletonBar} />
+                    <View style={[styles.skeletonJoint, { backgroundColor: colors.secondary }]} />
                   </View>
                 </View>
               </View>
-            ) : (
-              <View style={styles.noVideoCard}>
-                <Zap size={24} color={colors.textMuted} />
-                <Text style={styles.noVideoText}>No video submitted for this match</Text>
+
+              <View style={styles.controls}>
+                <TouchableOpacity style={styles.playBtn} onPress={togglePlayback}>
+                  {isPlaying ? (
+                    <Pause size={22} color={colors.bg} />
+                  ) : (
+                    <Play size={22} color={colors.bg} />
+                  )}
+                </TouchableOpacity>
+
+                <View style={styles.speedRow}>
+                  {SPEED_OPTIONS.map((s) => (
+                    <TouchableOpacity
+                      key={s}
+                      style={[styles.speedBtn, speed === s && styles.speedBtnActive]}
+                      onPress={() => handleSpeedChange(s)}
+                    >
+                      <Text style={[styles.speedText, speed === s && styles.speedTextActive]}>
+                        {s}×
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
               </View>
-            )}
+            </View>
 
             {challengerRepEvents.length > 0 && (
               <View style={styles.timelineCard}>
@@ -319,7 +326,7 @@ export default function CourtroomScreen() {
                   durationMs={durationMs}
                   currentPositionMs={positionMs}
                   onSeek={handleSeek}
-                  label={`${challenger?.display_name?.split(' ')[0] ?? 'Challenger'}`}
+                  label={cLabel.split(' ')[0] ?? 'P'}
                   tintColor={colors.primary}
                 />
                 {opponentRepEvents.length > 0 && (
@@ -329,13 +336,60 @@ export default function CourtroomScreen() {
                       durationMs={durationMs}
                       currentPositionMs={positionMs}
                       onSeek={handleSeek}
-                      label={`${opponent?.display_name?.split(' ')[0] ?? 'Opponent'}`}
+                      label={oLabel.split(' ')[0] ?? 'P'}
                       tintColor={colors.secondary}
                     />
                   </View>
                 )}
               </View>
             )}
+
+            <View style={styles.socialCard}>
+              <Text style={styles.socialTitle}>Reactions</Text>
+              <View style={styles.reactRow}>
+                {(['fire', 'clap', 'skull'] as const).map((k) => (
+                  <TouchableOpacity
+                    key={k}
+                    style={styles.reactBtn}
+                    onPress={() => onReact(k)}
+                    disabled={socialLoading || !session?.user}
+                  >
+                    <Text style={styles.reactEmoji}>
+                      {k === 'fire' ? '🔥' : k === 'clap' ? '👏' : '💀'}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={styles.reactionMeta}>{reactions.length} on this session</Text>
+              <Text style={styles.socialTitle}>Comments</Text>
+              {comments.map((c) => (
+                <View key={c.id} style={styles.commentRow}>
+                  <Text style={styles.commentAuthor}>
+                    {playerAnonLabel(c.user_id)}
+                  </Text>
+                  <Text style={styles.commentBody}>{c.body}</Text>
+                </View>
+              ))}
+              {session?.user && (
+                <View style={styles.commentComposer}>
+                  <TextInput
+                    style={styles.commentInput}
+                    value={commentDraft}
+                    onChangeText={setCommentDraft}
+                    placeholder="Add a comment…"
+                    placeholderTextColor={colors.textMuted}
+                    multiline
+                  />
+                  <TouchableOpacity
+                    style={styles.commentSend}
+                    onPress={onSendComment}
+                    disabled={socialLoading || !commentDraft.trim()}
+                  >
+                    <Text style={styles.commentSendText}>Post</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
 
             <View style={styles.detailsCard}>
               <View style={styles.detailRow}>
@@ -488,6 +542,65 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.accent,
   },
+  skeletonSection: {
+    gap: spacing.sm,
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.md,
+    alignItems: 'center',
+  },
+  skeletonTitle: {
+    fontFamily: typography.fontDisplay,
+    fontSize: 16,
+    color: colors.text,
+  },
+  skeletonBody: {
+    fontFamily: typography.fontBody,
+    fontSize: 13,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  dualSkeleton: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    width: '100%',
+    marginTop: spacing.sm,
+  },
+  skeletonPane: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    alignItems: 'center',
+    minHeight: 140,
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.bgElevated,
+  },
+  skeletonPaneLabel: {
+    fontFamily: typography.fontBodyMedium,
+    fontSize: 11,
+    color: colors.textMuted,
+  },
+  skeletonStickFigure: {
+    alignItems: 'center',
+    gap: 6,
+  },
+  skeletonJoint: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  skeletonBar: {
+    width: 4,
+    height: 48,
+    backgroundColor: colors.border,
+    borderRadius: 2,
+  },
   videoSection: {
     gap: spacing.sm,
   },
@@ -569,6 +682,94 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   speedTextActive: { color: colors.primary },
+  publicTheatre: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.md,
+  },
+  publicTheatreTitle: {
+    fontFamily: typography.fontDisplay,
+    fontSize: 16,
+    color: colors.text,
+  },
+  publicTheatreBody: {
+    fontFamily: typography.fontBody,
+    fontSize: 13,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  socialCard: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  socialTitle: {
+    fontFamily: typography.fontBodyMedium,
+    fontSize: 11,
+    color: colors.textMuted,
+    letterSpacing: 2,
+  },
+  reactRow: { flexDirection: 'row', gap: spacing.md },
+  reactBtn: {
+    padding: spacing.sm,
+    backgroundColor: colors.bgElevated,
+    borderRadius: radius.md,
+  },
+  reactEmoji: { fontSize: 22 },
+  reactionMeta: {
+    fontFamily: typography.fontBody,
+    fontSize: 12,
+    color: colors.textMuted,
+    marginBottom: spacing.sm,
+  },
+  commentRow: {
+    paddingVertical: spacing.xs,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSubtle,
+  },
+  commentAuthor: {
+    fontFamily: typography.fontBodyMedium,
+    fontSize: 11,
+    color: colors.primary,
+  },
+  commentBody: {
+    fontFamily: typography.fontBody,
+    fontSize: 13,
+    color: colors.text,
+    marginTop: 2,
+  },
+  commentComposer: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-end', marginTop: spacing.sm },
+  commentInput: {
+    flex: 1,
+    minHeight: 44,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    color: colors.text,
+    fontFamily: typography.fontBody,
+  },
+  commentSend: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+  },
+  commentSendText: {
+    fontFamily: typography.fontBodyBold,
+    fontSize: 13,
+    color: colors.textInverse,
+  },
   noVideoCard: {
     backgroundColor: colors.bgCard,
     borderRadius: radius.lg,

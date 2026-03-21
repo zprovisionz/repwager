@@ -1,10 +1,15 @@
 import { useEffect, useRef, Component } from 'react';
-import { Stack } from 'expo-router';
+import { Stack, usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { useFonts } from 'expo-font';
-import { Inter_400Regular, Inter_500Medium, Inter_700Bold } from '@expo-google-fonts/inter';
-import { Orbitron_500Medium, Orbitron_700Bold } from '@expo-google-fonts/orbitron';
+import { Barlow_400Regular, Barlow_500Medium, Barlow_700Bold } from '@expo-google-fonts/barlow';
+import {
+  BarlowCondensed_600SemiBold,
+  BarlowCondensed_700Bold,
+  BarlowCondensed_900Black,
+} from '@expo-google-fonts/barlow-condensed';
+import { legacyColors } from '@/constants/theme';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Notifications from 'expo-notifications';
 import { supabase } from '@/lib/supabase';
@@ -52,22 +57,28 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 const ebStyles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#080C14',
+    backgroundColor: legacyColors.bg,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
     gap: 16,
   },
-  title: { fontFamily: 'Inter-Bold', fontSize: 20, color: '#F0F4FF', textAlign: 'center' },
-  body: { fontFamily: 'Inter-Regular', fontSize: 14, color: '#8A9DC0', textAlign: 'center', lineHeight: 22 },
+  title: { fontFamily: 'Barlow_700Bold', fontSize: 20, color: legacyColors.text, textAlign: 'center' },
+  body: {
+    fontFamily: 'Barlow_400Regular',
+    fontSize: 14,
+    color: legacyColors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
   btn: {
-    backgroundColor: '#00D4FF',
+    backgroundColor: legacyColors.primary,
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 32,
     marginTop: 8,
   },
-  btnText: { fontFamily: 'Inter-Bold', fontSize: 15, color: '#080C14' },
+  btnText: { fontFamily: 'Barlow_700Bold', fontSize: 15, color: legacyColors.textInverse },
 });
 
 SplashScreen.preventAutoHideAsync();
@@ -102,16 +113,31 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
   }
 }
 
-function OnboardingGate() {
-  const { profile, session } = useAuthStore();
-  const router = require('expo-router').useRouter();
+function AuthGate() {
+  const pathname = usePathname();
+  const router = useRouter();
+  const { authStage, isLoading } = useAuthStore();
 
   useEffect(() => {
-    if (!session || !profile) return;
-    if (!(profile as any).has_completed_onboarding) {
-      router.replace('/onboarding');
+    if (isLoading) return;
+    const inAuth = pathname.startsWith('/(auth)');
+
+    if (authStage === 'signed_out' && !inAuth) {
+      router.replace('/(auth)');
+      return;
     }
-  }, [session, profile]);
+    if (authStage === 'needs_email_verification' && pathname !== '/(auth)/verify-email') {
+      router.replace('/(auth)/verify-email');
+      return;
+    }
+    if (authStage === 'needs_username' && pathname !== '/(auth)/username-setup') {
+      router.replace('/(auth)/username-setup');
+      return;
+    }
+    if (authStage === 'authenticated' && inAuth) {
+      router.replace('/(tabs)');
+    }
+  }, [authStage, pathname, isLoading]);
 
   return null;
 }
@@ -119,19 +145,22 @@ function OnboardingGate() {
 export default function RootLayout() {
   useFrameworkReady();
 
-  const { setSession, setProfile, setLoading } = useAuthStore();
+  const { setSession, setProfile, setLoading, hydrateAuth } = useAuthStore();
   const notificationListener = useRef<Subscription | undefined>(undefined);
   const responseListener = useRef<Subscription | undefined>(undefined);
 
   const [fontsLoaded, fontError] = useFonts({
-    'Inter-Regular': Inter_400Regular,
-    'Inter-Medium': Inter_500Medium,
-    'Inter-Bold': Inter_700Bold,
-    'Orbitron-Medium': Orbitron_500Medium,
-    'Orbitron-Bold': Orbitron_700Bold,
+    Barlow_400Regular: Barlow_400Regular,
+    Barlow_500Medium: Barlow_500Medium,
+    Barlow_700Bold: Barlow_700Bold,
+    BarlowCondensed_600SemiBold: BarlowCondensed_600SemiBold,
+    BarlowCondensed_700Bold: BarlowCondensed_700Bold,
+    BarlowCondensed_900Black: BarlowCondensed_900Black,
   });
 
   useEffect(() => {
+    hydrateAuth();
+
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       (async () => {
         setSession(session);
@@ -151,18 +180,6 @@ export default function RootLayout() {
         }
         setLoading(false);
       })();
-    });
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session?.user) {
-        getProfile(session.user.id)
-          .then((p) => setProfile(p))
-          .catch(() => setProfile(null))
-          .finally(() => setLoading(false));
-      } else {
-        setLoading(false);
-      }
     });
 
     notificationListener.current = Notifications.addNotificationReceivedListener(
@@ -198,16 +215,24 @@ export default function RootLayout() {
 
   return (
     <ErrorBoundary>
-      <OnboardingGate />
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#080C14' } }}>
+      <AuthGate />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: legacyColors.bg },
+        }}
+      >
         <Stack.Screen name="(auth)" />
-        <Stack.Screen name="onboarding" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="match/[id]" options={{ presentation: 'fullScreenModal' }} />
         <Stack.Screen name="match/results" options={{ presentation: 'fullScreenModal' }} />
         <Stack.Screen name="match/reveal" options={{ presentation: 'fullScreenModal' }} />
+        <Stack.Screen name="match/result" options={{ presentation: 'fullScreenModal' }} />
         <Stack.Screen name="challenge/create" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="challenge/search" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="challenge/[id]" options={{ presentation: 'modal' }} />
         <Stack.Screen name="theatre/[id]" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="onboarding" options={{ headerShown: false }} />
         <Stack.Screen name="leagues" options={{ headerShown: false }} />
         <Stack.Screen name="+not-found" />
       </Stack>

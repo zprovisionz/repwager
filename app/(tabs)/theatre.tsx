@@ -4,7 +4,8 @@ import { colors, typography, spacing, radius } from '@/lib/theme';
 import { Film, Trophy, Zap, Eye } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuthStore } from '@/stores/authStore';
-import { getUserMatches } from '@/services/match.service';
+import { getUserMatches, getPublicTheatreFeed } from '@/services/match.service';
+import { playerAnonLabel } from '@/lib/theatreAnon';
 import { getProfile } from '@/services/profile.service';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'expo-router';
@@ -21,10 +22,13 @@ function MatchCard({
   item,
   myUserId,
   onPress,
+  anon = false,
 }: {
   item: MatchWithProfiles;
   myUserId: string;
   onPress: () => void;
+  /** Discover feed: anonymize handles */
+  anon?: boolean;
 }) {
   const { match, challenger, opponent } = item;
   const iAmChallenger = match.challenger_id === myUserId;
@@ -33,6 +37,12 @@ function MatchCard({
   const repDelta = myReps - theirReps;
   const iWon = match.winner_id === myUserId;
   const other = iAmChallenger ? opponent : challenger;
+  const vsLabel =
+    anon && challenger
+      ? `${playerAnonLabel(match.challenger_id)} vs ${
+          match.opponent_id ? playerAnonLabel(match.opponent_id) : '…'
+        }`
+      : `vs @${other?.username ?? '???'}`;
 
   const hasVideos =
     match.challenger_video_path || match.opponent_video_path;
@@ -46,9 +56,7 @@ function MatchCard({
             <Text style={styles.exercise}>
               {EXERCISE_LABELS[match.exercise_type]}
             </Text>
-            <Text style={styles.opponent}>
-              vs @{other?.username ?? '???'}
-            </Text>
+            <Text style={styles.opponent}>{vsLabel}</Text>
           </View>
 
           <View style={styles.cardRight}>
@@ -138,24 +146,34 @@ export default function TheatreScreen() {
   const insets = useSafeAreaInsets();
   const { session } = useAuthStore();
   const router = useRouter();
-  const [items, setItems] = useState<MatchWithProfiles[]>([]);
+  const [feedTab, setFeedTab] = useState<'discover' | 'mine'>('discover');
+  const [itemsDiscover, setItemsDiscover] = useState<MatchWithProfiles[]>([]);
+  const [itemsMine, setItemsMine] = useState<MatchWithProfiles[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  const enrich = async (matches: Match[]) => {
+    return Promise.all(
+      matches.map(async (m) => {
+        const [c, o] = await Promise.all([
+          getProfile(m.challenger_id).catch(() => null),
+          m.opponent_id ? getProfile(m.opponent_id).catch(() => null) : Promise.resolve(null),
+        ]);
+        return { match: m, challenger: c, opponent: o };
+      })
+    );
+  };
 
   async function load() {
     if (!session?.user) return;
     try {
-      const matches = await getUserMatches(session.user.id, 'completed');
-      const enriched = await Promise.all(
-        matches.map(async (m) => {
-          const [c, o] = await Promise.all([
-            getProfile(m.challenger_id).catch(() => null),
-            m.opponent_id ? getProfile(m.opponent_id).catch(() => null) : Promise.resolve(null),
-          ]);
-          return { match: m, challenger: c, opponent: o };
-        })
-      );
-      setItems(enriched);
+      const [pub, mine] = await Promise.all([
+        getPublicTheatreFeed(40),
+        getUserMatches(session.user.id, 'completed'),
+      ]);
+      const [d, mi] = await Promise.all([enrich(pub), enrich(mine)]);
+      setItemsDiscover(d);
+      setItemsMine(mi);
     } catch {
     } finally {
       setLoading(false);
@@ -170,12 +188,33 @@ export default function TheatreScreen() {
     setRefreshing(false);
   }, [session?.user?.id]);
 
+  const items = feedTab === 'discover' ? itemsDiscover : itemsMine;
+
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
         <Film size={20} color={colors.primary} />
         <Text style={styles.headerTitle}>THEATRE</Text>
         <Text style={styles.headerSub}>{items.length} replays</Text>
+      </View>
+
+      <View style={styles.feedTabs}>
+        <TouchableOpacity
+          style={[styles.feedTab, feedTab === 'discover' && styles.feedTabActive]}
+          onPress={() => setFeedTab('discover')}
+        >
+          <Text style={[styles.feedTabText, feedTab === 'discover' && styles.feedTabTextActive]}>
+            Discover
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.feedTab, feedTab === 'mine' && styles.feedTabActive]}
+          onPress={() => setFeedTab('mine')}
+        >
+          <Text style={[styles.feedTabText, feedTab === 'mine' && styles.feedTabTextActive]}>
+            My sessions
+          </Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView
@@ -206,6 +245,7 @@ export default function TheatreScreen() {
                 key={item.match.id}
                 item={item}
                 myUserId={session?.user?.id ?? ''}
+                anon={feedTab === 'discover'}
                 onPress={() =>
                   router.push({
                     pathname: '/theatre/[id]',
@@ -244,6 +284,30 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textMuted,
   },
+  feedTabs: {
+    flexDirection: 'row',
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.md,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: 4,
+  },
+  feedTab: {
+    flex: 1,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+    borderRadius: radius.sm,
+  },
+  feedTabActive: { backgroundColor: colors.primary + '33' },
+  feedTabText: {
+    fontFamily: typography.fontBodyMedium,
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
+  feedTabTextActive: { color: colors.text },
   scroll: {
     flexGrow: 1,
     paddingHorizontal: spacing.md,

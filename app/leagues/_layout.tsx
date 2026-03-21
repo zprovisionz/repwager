@@ -7,6 +7,7 @@ export default function LeaguesLayout() {
       <Stack.Screen name="[id]" />
       <Stack.Screen name="create" options={{ presentation: 'modal' }} />
       <Stack.Screen name="bracket" options={{ presentation: 'modal' }} />
+      <Stack.Screen name="war" />
     </Stack>
   );
 }

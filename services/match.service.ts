@@ -16,13 +16,23 @@ import {
 const repStorageKey = (matchId: string) => `repwager:reps:${matchId}`;
 const repEventsStorageKey = (matchId: string) => `repwager:events:${matchId}`;
 
+const ALLOWED_SUBMISSION_WINDOWS = new Set([1, 2, 6, 24]);
+
 export async function createMatch(
   challengerId: string,
   exerciseType: 'push_ups' | 'squats',
   wagerAmount: number,
   mode: 'wager' | 'casual' = 'wager',
-  opponentId?: string
+  opponentId?: string,
+  submissionWindowHours: number = 2
 ): Promise<Match> {
+  if (exerciseType === 'squats') {
+    throw new Error('Squats are locked for launch — choose push-ups.');
+  }
+  const hours = ALLOWED_SUBMISSION_WINDOWS.has(submissionWindowHours)
+    ? submissionWindowHours
+    : 2;
+
   const { data, error } = await (supabase.from('matches') as any)
     .insert({
       challenger_id: challengerId,
@@ -31,6 +41,7 @@ export async function createMatch(
       status: 'pending',
       match_mode: mode,
       opponent_id: opponentId ?? null,
+      submission_window_hours: hours,
     })
     .select()
     .maybeSingle();
@@ -55,7 +66,9 @@ export async function createDirectChallenge(
   challengerId: string,
   opponentUsername: string,
   exerciseType: 'push_ups' | 'squats',
-  wagerAmount: number
+  wagerAmount: number,
+  mode: 'wager' | 'casual' = 'wager',
+  submissionWindowHours: number = 2
 ): Promise<Match> {
   const { data: opponent, error: profileError } = await (supabase
     .from('profiles') as any)
@@ -67,7 +80,14 @@ export async function createDirectChallenge(
   if (!opponent) throw new Error(`No user found with username @${opponentUsername}`);
   if (opponent.id === challengerId) throw new Error('You cannot challenge yourself');
 
-  return createMatch(challengerId, exerciseType, wagerAmount, 'wager', opponent.id);
+  return createMatch(
+    challengerId,
+    exerciseType,
+    wagerAmount,
+    mode,
+    opponent.id,
+    submissionWindowHours
+  );
 }
 
 export async function acceptMatch(
@@ -157,6 +177,21 @@ export async function getMatch(matchId: string): Promise<Match | null> {
   return data as Match | null;
 }
 
+/** Open-challenge detail: match + challenger profile row */
+export async function getMatchWithChallengerProfile(
+  matchId: string
+): Promise<(Match & { profiles: Record<string, unknown> | null }) | null> {
+  const { data, error } = await (supabase.from('matches') as any)
+    .select(
+      '*, profiles!matches_challenger_id_fkey(username, display_name, wins, losses, avatar_gender, elo, rank_tier)'
+    )
+    .eq('id', matchId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as (Match & { profiles: Record<string, unknown> | null }) | null;
+}
+
 export function buildMatchDisplay(
   match: Match,
   myUserId: string
@@ -241,7 +276,7 @@ export async function getOpenChallenges(
     )
     .eq('status', 'pending')
     .is('opponent_id', null)
-    .eq('match_mode', 'wager')
+    .in('match_mode', ['wager', 'casual'])
     .neq('challenger_id', excludeUserId)
     .gt('expires_at', new Date().toISOString())
     .order('created_at', { ascending: false })
@@ -289,6 +324,36 @@ export async function searchProfiles(
 
   if (error) throw error;
   return (data ?? []) as ProfileSearchResult[];
+}
+
+/** Completed matches for public Theatre feed (RLS allows reading completed rows). */
+export async function getPublicTheatreFeed(limit = 40): Promise<Match[]> {
+  const { data, error } = await (supabase.from('matches') as any)
+    .select('*')
+    .eq('status', 'completed')
+    .order('completed_at', { ascending: false })
+    .limit(limit);
+
+  if (error) throw error;
+  return (data ?? []) as Match[];
+}
+
+/** Best winning rep count in any completed match (personal best). */
+export async function getUserPersonalBestReps(userId: string): Promise<number> {
+  const { data, error } = await (supabase.from('matches') as any)
+    .select('challenger_reps, opponent_reps, winner_id, challenger_id, opponent_id, status')
+    .eq('status', 'completed')
+    .or(`challenger_id.eq.${userId},opponent_id.eq.${userId}`);
+
+  if (error) throw error;
+  let max = 0;
+  for (const m of data ?? []) {
+    if (m.winner_id !== userId) continue;
+    const mine =
+      m.challenger_id === userId ? m.challenger_reps : m.opponent_reps;
+    if (typeof mine === 'number' && mine > max) max = mine;
+  }
+  return max;
 }
 
 export function subscribeToMatch(

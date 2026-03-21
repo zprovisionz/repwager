@@ -108,6 +108,7 @@ export interface Database {
           opponent_rep_events: RepEvent[];
           match_mode: MatchMode;
           rematch_of: string | null;
+          submission_window_hours: number;
           created_at: string;
           updated_at: string;
         };
@@ -201,7 +202,7 @@ export interface Database {
 
     Functions: {
       new_user_profile: {
-        Args: { p_user_id: string; p_username: string; p_display_name: string; p_avatar_gender?: string };
+        Args: { p_user_id: string; p_username: string; p_avatar_gender?: string };
         Returns: Database['public']['Tables']['profiles']['Row'];
       };
       accept_match: {

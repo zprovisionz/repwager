@@ -12,20 +12,23 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuthStore } from '@/stores/authStore';
 import { colors, typography, spacing, radius } from '@/lib/theme';
+import { BarlowText } from '@/components/ui/BarlowText';
+import { StatStrip } from '@/components/ui/StatStrip';
+import { ChallengeCard } from '@/components/ui/ChallengeCard';
+import { CountdownTimer } from '@/components/ui/CountdownTimer';
+import { MatchTypeBadge } from '@/components/ui/MatchTypeBadge';
+import { ELODiffBadge } from '@/components/ui/ELODiffBadge';
 import {
   getUserMatches,
   getOpenChallenges,
-  acceptMatch,
   buildMatchDisplay,
 } from '@/services/match.service';
 import { checkStreakStatus } from '@/services/streak.service';
 import { useToastStore } from '@/stores/toastStore';
 import Avatar from '@/components/Avatar';
 import {
-  Plus,
   Zap,
   Flame,
-  Target,
   Trophy,
   Clock,
   CheckCircle,
@@ -33,24 +36,22 @@ import {
   Search,
   Snowflake,
   Lock,
+  Bell,
 } from 'lucide-react-native';
+import { Colors } from '@/constants/theme';
+import { acceptMatch } from '@/services/match.service';
 
 const CASUAL_MATCHES_TO_UNLOCK = 10;
-import type { Match } from '@/types/database';
+import type { Match, MatchMode } from '@/types/database';
 import {
   ACTIVE_MATCH_STATUSES,
   TERMINAL_MATCH_STATUSES,
   RANK_TIER_COLORS,
 } from '@/types/database';
 
-function formatTimeRemaining(seconds: number): string {
-  if (seconds <= 0) return 'Expired';
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
+function resolveMatchMode(m: Match): MatchMode {
+  if (m.match_mode) return m.match_mode;
+  return (m.wager_amount ?? 0) === 0 ? 'casual' : 'wager';
 }
 
 function AsyncMatchCard({
@@ -63,22 +64,7 @@ function AsyncMatchCard({
   onPress: () => void;
 }) {
   const display = buildMatchDisplay(match, myUserId);
-  const [timeStr, setTimeStr] = useState(
-    display.timeRemainingSeconds !== null
-      ? formatTimeRemaining(display.timeRemainingSeconds)
-      : null
-  );
-
-  useEffect(() => {
-    if (!match.submission_deadline) return;
-    const interval = setInterval(() => {
-      const remaining = Math.floor(
-        (new Date(match.submission_deadline!).getTime() - Date.now()) / 1000
-      );
-      setTimeStr(remaining > 0 ? formatTimeRemaining(remaining) : 'Expired');
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [match.submission_deadline]);
+  const mode = resolveMatchMode(match);
 
   const statusConfig: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
     accepted: {
@@ -136,16 +122,16 @@ function AsyncMatchCard({
     ACTIVE_MATCH_STATUSES.includes(match.status);
 
   return (
-    <TouchableOpacity onPress={onPress} activeOpacity={0.8}>
-      <View
-        style={[
-          styles.asyncCard,
-          { borderLeftColor: isUrgent ? colors.secondary : config.color },
-          isUrgent && styles.asyncCardUrgent,
-        ]}
-      >
+    <ChallengeCard
+      accentColor={isUrgent ? colors.secondary : config.color}
+      onPress={onPress}
+      urgent={isUrgent}
+    >
         <View style={styles.asyncCardTop}>
           <View style={styles.asyncCardLeft}>
+            <View style={styles.asyncBadgeRow}>
+              <MatchTypeBadge mode={mode} />
+            </View>
             <View style={styles.asyncExerciseRow}>
               <Zap size={13} color={colors.primary} />
               <Text style={styles.asyncExercise}>Push-Ups</Text>
@@ -211,30 +197,17 @@ function AsyncMatchCard({
           </View>
         </View>
 
-        {timeStr && ACTIVE_MATCH_STATUSES.includes(match.status) && (
-          <View style={styles.asyncTimer}>
-            <Clock
-              size={11}
-              color={isUrgent ? colors.secondary : colors.textMuted}
-            />
-            <Text
-              style={[
-                styles.asyncTimerText,
-                isUrgent && { color: colors.secondary },
-              ]}
-            >
-              {timeStr} remaining
-            </Text>
-          </View>
-        )}
+        <CountdownTimer
+          deadlineIso={match.submission_deadline}
+          visible={ACTIVE_MATCH_STATUSES.includes(match.status)}
+        />
 
         {match.status === 'expired' && (
           <View style={styles.asyncRefundBadge}>
             <Text style={styles.asyncRefundText}>✓ RepCoins refunded</Text>
           </View>
         )}
-      </View>
-    </TouchableOpacity>
+    </ChallengeCard>
   );
 }
 
@@ -263,8 +236,7 @@ export default function HomeScreen() {
   const [openChallenges, setOpenChallenges] = useState<any[]>([]);
   const [tab, setTab] = useState<'open' | 'mine'>('open');
   const [refreshing, setRefreshing] = useState(false);
-  const [accepting, setAccepting] = useState<string | null>(null);
-
+  const [acceptingId, setAcceptingId] = useState<string | null>(null);
   async function load() {
     if (!session?.user) return;
     try {
@@ -287,36 +259,32 @@ export default function HomeScreen() {
     setRefreshing(false);
   }, [refreshProfile]);
 
-  async function handleAccept(match: any) {
-    if (!session?.user || !profile) return;
-    const repcoins = (profile as any).repcoins ?? 100;
-    if (repcoins < match.wager_amount) {
-      showToast({
-        type: 'error',
-        title: 'Insufficient RepCoins',
-        message: `Need ${match.wager_amount} RC`,
-      });
-      return;
-    }
-    setAccepting(match.id);
-    try {
-      await acceptMatch(match.id, session.user.id);
-      showToast({
-        type: 'success',
-        title: 'Challenge Accepted!',
-        message: 'You have 2 hours to record your set.',
-      });
-      await Promise.all([load(), refreshProfile()]);
-    } catch (e: any) {
-      showToast({
-        type: 'error',
-        title: 'Could not accept',
-        message: e.message,
-      });
-    } finally {
-      setAccepting(null);
-    }
-  }
+  const handleAcceptOpen = useCallback(
+    async (m: Match) => {
+      if (!session?.user || !profile) return;
+      const repcoins = (profile as any).repcoins ?? 100;
+      if (m.wager_amount > 0 && repcoins < m.wager_amount) {
+        showToast({
+          type: 'error',
+          title: 'Insufficient RepCoins',
+          message: `Need ${m.wager_amount} RC`,
+        });
+        return;
+      }
+      setAcceptingId(m.id);
+      try {
+        await acceptMatch(m.id, session.user.id);
+        showToast({ type: 'success', title: 'Challenge accepted!', message: 'Record your set.' });
+        await load();
+        router.push({ pathname: '/match/[id]', params: { id: m.id } });
+      } catch (e: any) {
+        showToast({ type: 'error', title: e.message ?? 'Could not accept' });
+      } finally {
+        setAcceptingId(null);
+      }
+    },
+    [session?.user, profile, showToast, load, router]
+  );
 
   const activeMatches = myMatches.filter((m) =>
     ACTIVE_MATCH_STATUSES.includes(m.status)
@@ -347,7 +315,7 @@ export default function HomeScreen() {
       showsVerticalScrollIndicator={false}
     >
       <LinearGradient
-        colors={['#00D4FF12', colors.bg]}
+        colors={[colors.primary + '14', colors.bg]}
         style={styles.header}
       >
         <View
@@ -365,9 +333,9 @@ export default function HomeScreen() {
               size={52}
             />
             <View style={styles.profileText}>
-              <Text style={styles.greeting}>
+              <BarlowText variant="displayMedium" style={styles.greeting}>
                 {profile?.display_name?.split(' ')[0] ?? 'Champ'}
-              </Text>
+              </BarlowText>
               <View style={styles.rankRow}>
                 <View
                   style={[
@@ -381,44 +349,46 @@ export default function HomeScreen() {
                 </View>
               </View>
             </View>
-            <TouchableOpacity
-              style={styles.searchBtn}
-              onPress={() => router.push('/challenge/search')}
-            >
-              <Search size={18} color={colors.textSecondary} />
-            </TouchableOpacity>
+            <View style={styles.headerActions}>
+              <TouchableOpacity
+                style={styles.iconBtn}
+                onPress={() => router.push('/(tabs)/notifications')}
+              >
+                <Bell size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.iconBtn}
+                onPress={() => router.push('/challenge/search')}
+              >
+                <Search size={18} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
           </View>
 
-          <View style={styles.statsRow}>
-            <View style={styles.statBlock}>
-              <Text style={styles.statValue}>
-                {(profile as any)?.repcoins ?? 100}
-              </Text>
-              <Text style={styles.statLabel}>RepCoins</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statBlock}>
-              <Text style={styles.statValue}>
-                {profile?.wins ?? 0}W-{profile?.losses ?? 0}L
-              </Text>
-              <Text style={styles.statLabel}>Record</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statBlock}>
-              <Text style={styles.statValue}>
-                {(profile as any)?.elo ?? 1000}
-              </Text>
-              <Text style={styles.statLabel}>ELO</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statBlock}>
-              <StreakIcon profile={profile} />
-              <Text style={styles.statValue}>
-                {profile?.current_streak ?? 0}
-              </Text>
-              <Text style={styles.statLabel}>Streak</Text>
-            </View>
-          </View>
+          <StatStrip
+            items={[
+              {
+                label: 'RepCoins',
+                value: (profile as any)?.repcoins ?? 100,
+                valueColor: Colors.accent.amber,
+              },
+              {
+                label: 'Record',
+                value: `${profile?.wins ?? 0}W-${profile?.losses ?? 0}L`,
+              },
+              {
+                label: 'ELO',
+                value: (profile as any)?.elo ?? 1000,
+                valueColor: Colors.accent.cyan,
+              },
+              {
+                label: 'Streak',
+                value: profile?.current_streak ?? 0,
+                valueColor: Colors.accent.fire,
+                adornment: <StreakIcon profile={profile} />,
+              },
+            ]}
+          />
         </View>
       </LinearGradient>
 
@@ -446,7 +416,9 @@ export default function HomeScreen() {
 
       {activeMatches.length > 0 && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>ACTIVE MATCHES</Text>
+          <BarlowText variant="label" color={colors.textMuted} style={styles.sectionTitle}>
+            Active matches
+          </BarlowText>
           <View style={styles.list}>
             {activeMatches.map((m) => (
               <AsyncMatchCard
@@ -496,28 +468,48 @@ export default function HomeScreen() {
 
       {tab === 'open' && (
         <View style={styles.section}>
+          <View style={styles.sectionHeaderRow}>
+            <BarlowText variant="label" color={colors.textMuted} style={[styles.sectionTitle, { marginBottom: 0 }]}>
+              Feed
+            </BarlowText>
+            <TouchableOpacity onPress={() => router.push('/challenge' as any)}>
+              <Text style={styles.findLinkText}>Find & filter</Text>
+            </TouchableOpacity>
+          </View>
           {openChallenges.length === 0 ? (
-            <View style={styles.empty}>
+            <View style={styles.emptyDashed}>
               <Zap size={36} color={colors.textMuted} />
-              <Text style={styles.emptyTitle}>No open challenges</Text>
+              <Text style={styles.emptyTitle}>Post a challenge</Text>
               <Text style={styles.emptySubtitle}>
-                Be the first — create a challenge!
+                No open matches right now — be the first on the board.
               </Text>
               <TouchableOpacity
                 style={styles.emptyBtn}
                 onPress={() => router.push('/challenge/create')}
               >
-                <Text style={styles.emptyBtnText}>Create Challenge</Text>
+                <Text style={styles.emptyBtnText}>Post a Challenge</Text>
               </TouchableOpacity>
             </View>
           ) : (
             <View style={styles.list}>
               {openChallenges.map((m) => {
                 const challenger = m.profiles;
+                const myElo = (profile as any)?.elo ?? 1000;
+                const theirElo = challenger?.elo ?? 1000;
+                const mode = resolveMatchMode(m as Match);
+                const accent = mode === 'casual' ? colors.primary : colors.accent;
                 return (
-                  <View key={m.id} style={styles.openChallengeCard}>
+                  <ChallengeCard
+                    key={m.id}
+                    accentColor={accent}
+                    onPress={() => router.push(`/challenge/${m.id}` as any)}
+                  >
                     <View style={styles.openChallengeTop}>
-                      <View>
+                      <View style={styles.openChallengeMeta}>
+                        <View style={styles.openChallengeBadgeRow}>
+                          <MatchTypeBadge mode={mode} />
+                          <ELODiffBadge myElo={myElo} theirElo={theirElo} />
+                        </View>
                         <Text style={styles.openChallengeName}>
                           @{challenger?.username ?? '???'}
                         </Text>
@@ -536,32 +528,32 @@ export default function HomeScreen() {
                             {challenger.rank_tier}
                           </Text>
                         )}
+                        <Text style={styles.openTapHint}>Tap for detail</Text>
+                        <TouchableOpacity
+                          style={[styles.acceptPill, { borderColor: accent }]}
+                          disabled={acceptingId === m.id}
+                          onPress={() => handleAcceptOpen(m as Match)}
+                        >
+                          <Text style={[styles.acceptPillText, { color: accent }]}>
+                            {acceptingId === m.id ? '…' : 'Accept'}
+                          </Text>
+                        </TouchableOpacity>
                       </View>
                       <View style={styles.openChallengeWager}>
-                        <Text style={styles.openChallengeWagerAmount}>
-                          {m.wager_amount} RC
+                        <Text
+                          style={[
+                            styles.openChallengeWagerAmount,
+                            { color: accent },
+                          ]}
+                        >
+                          {mode === 'casual' ? '0 RC' : `${m.wager_amount} RC`}
                         </Text>
                         <Text style={styles.openChallengeWagerLabel}>
-                          wager
+                          {mode === 'casual' ? 'casual' : 'wager'}
                         </Text>
                       </View>
                     </View>
-
-                    <TouchableOpacity
-                      style={[
-                        styles.acceptBtn,
-                        accepting === m.id && styles.acceptBtnLoading,
-                      ]}
-                      onPress={() => handleAccept(m)}
-                      disabled={accepting === m.id}
-                    >
-                      <Text style={styles.acceptBtnText}>
-                        {accepting === m.id
-                          ? 'Accepting...'
-                          : `Accept — ${m.wager_amount} RC`}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
+                  </ChallengeCard>
                 );
               })}
             </View>
@@ -650,8 +642,7 @@ const styles = StyleSheet.create({
   },
   profileText: { flex: 1 },
   greeting: {
-    fontFamily: typography.fontDisplay,
-    fontSize: 20,
+    fontSize: 22,
     color: colors.text,
     letterSpacing: 0.5,
   },
@@ -667,7 +658,8 @@ const styles = StyleSheet.create({
     fontSize: 11,
     letterSpacing: 1,
   },
-  searchBtn: {
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  iconBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
@@ -702,12 +694,22 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   section: { paddingHorizontal: spacing.md, marginTop: spacing.md },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.sm,
+  },
   sectionTitle: {
-    fontFamily: typography.fontDisplayMedium,
     fontSize: 11,
-    color: colors.textMuted,
     letterSpacing: 2,
     marginBottom: spacing.sm,
+  },
+  findLinkText: {
+    fontFamily: typography.fontBodyBold,
+    fontSize: 12,
+    color: colors.primary,
+    letterSpacing: 0.5,
   },
   list: { gap: spacing.sm },
   tabRow: {
@@ -752,6 +754,7 @@ const styles = StyleSheet.create({
   },
   asyncCardLeft: { gap: 3 },
   asyncCardRight: {},
+  asyncBadgeRow: { marginBottom: 2 },
   asyncExerciseRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -837,18 +840,17 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.success,
   },
-  openChallengeCard: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    gap: spacing.sm,
-  },
   openChallengeTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
+  },
+  openChallengeMeta: { flex: 1, gap: 4 },
+  openChallengeBadgeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 2,
   },
   openChallengeName: {
     fontFamily: typography.fontBodyBold,
@@ -871,22 +873,41 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.textMuted,
   },
-  acceptBtn: {
-    backgroundColor: colors.success,
-    borderRadius: radius.sm,
-    paddingVertical: spacing.sm,
-    alignItems: 'center',
+  openTapHint: {
+    fontFamily: typography.fontBody,
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 6,
   },
-  acceptBtnLoading: { opacity: 0.6 },
-  acceptBtnText: {
+  acceptPill: {
+    marginTop: spacing.sm,
+    alignSelf: 'flex-start',
+    borderWidth: 1.5,
+    borderRadius: radius.md,
+    paddingVertical: 6,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.bgElevated,
+  },
+  acceptPillText: {
     fontFamily: typography.fontBodyBold,
-    fontSize: 14,
-    color: colors.textInverse,
+    fontSize: 13,
+    letterSpacing: 1,
   },
   empty: {
     alignItems: 'center',
     paddingVertical: spacing.xxl,
     gap: spacing.sm,
+  },
+  emptyDashed: {
+    alignItems: 'center',
+    paddingVertical: spacing.xxl,
+    gap: spacing.sm,
+    marginHorizontal: spacing.xs,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.md,
   },
   emptyTitle: {
     fontFamily: typography.fontBodyBold,

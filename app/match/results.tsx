@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Animated, TouchableOpacity, ScrollView } from '
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, typography, spacing, radius } from '@/lib/theme';
+import { BarlowText } from '@/components/ui/BarlowText';
 import { useAuthStore } from '@/stores/authStore';
 import { useMatchStore } from '@/stores/matchStore';
 import { useToastStore } from '@/stores/toastStore';
@@ -94,13 +95,16 @@ export default function ResultsScreen() {
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <Animated.View style={[styles.heroSection, { opacity: titleAnim, transform: [{ scale: scaleAnim }] }]}>
           {won ? (
-            <Trophy size={80} color={colors.accent} />
+            <Trophy size={80} color={colors.success} />
           ) : (
             <Frown size={80} color={colors.textMuted} />
           )}
-          <Text style={[styles.resultTitle, won ? styles.winTitle : styles.loseTitle]}>
-            {won ? 'YOU WON!' : 'YOU LOST'}
-          </Text>
+          <BarlowText
+            variant="display"
+            style={[styles.resultTitle, won ? styles.winTitle : styles.loseTitle]}
+          >
+            {won ? 'VICTORY' : 'DEFEAT'}
+          </BarlowText>
           <Text style={styles.repDisplay}>{reps}</Text>
           <Text style={styles.repSub}>REPS</Text>
         </Animated.View>
@@ -125,6 +129,7 @@ export default function ResultsScreen() {
             label="Back to Home"
             onPress={() => router.replace('/(tabs)')}
             variant="primary"
+            tone="casual"
             size="lg"
             style={styles.actionBtn}
           />
@@ -132,6 +137,7 @@ export default function ResultsScreen() {
             label="View Match"
             onPress={() => router.replace({ pathname: '/theatre/[id]', params: { id: matchId! } })}
             variant="outline"
+            tone="casual"
             size="lg"
             style={styles.actionBtn}
           />
@@ -160,8 +166,8 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     letterSpacing: 3,
   },
-  winTitle: { color: colors.accent },
-  loseTitle: { color: colors.textMuted },
+  winTitle: { color: colors.success },
+  loseTitle: { color: colors.error },
   repDisplay: {
     fontFamily: typography.fontDisplay,
     fontSize: 96,

@@ -1,7 +1,6 @@
-import { Redirect, Tabs } from 'expo-router';
-import { useAuthStore } from '@/stores/authStore';
+import { Tabs } from 'expo-router';
 import { colors, typography } from '@/lib/theme';
-import { Home, Film, Trophy, User, Plus } from 'lucide-react-native';
+import { Home, Film, Trophy, User, Plus, Shield } from 'lucide-react-native';
 import {
   View,
   StyleSheet,
@@ -15,14 +14,20 @@ import Animated, {
   useAnimatedStyle,
   withSpring,
 } from 'react-native-reanimated';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
+import { useChallengeUiStore } from '@/stores/challengeUiStore';
+import { Colors } from '@/constants/theme';
 
 function CentreCreateButton() {
   const router = useRouter();
   const scale = useSharedValue(1);
+  const fabTone = useChallengeUiStore((s) => s.fabTone);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
   }));
+
+  const fabBg = fabTone === 'amber' ? Colors.accent.amber : colors.primary;
 
   function handlePress() {
     scale.value = withSpring(0.88, { damping: 12 }, () => {
@@ -37,7 +42,13 @@ function CentreCreateButton() {
       activeOpacity={1}
       style={styles.centreButtonWrapper}
     >
-      <Animated.View style={[styles.centreButton, animatedStyle]}>
+      <Animated.View
+        style={[
+          styles.centreButton,
+          { backgroundColor: fabBg, shadowColor: fabBg },
+          animatedStyle,
+        ]}
+      >
         <Plus size={26} color={colors.textInverse} strokeWidth={2.5} />
       </Animated.View>
     </TouchableOpacity>
@@ -45,14 +56,11 @@ function CentreCreateButton() {
 }
 
 export default function TabsLayout() {
-  const { session, profile, isLoading } = useAuthStore();
   const insets = useSafeAreaInsets();
 
-  if (isLoading) return null;
-  if (!session || !profile) return <Redirect href="/(auth)" />;
-
   return (
-    <Tabs
+    <ProtectedRoute>
+      <Tabs
       screenOptions={{
         headerShown: false,
         tabBarStyle: [
@@ -65,7 +73,7 @@ export default function TabsLayout() {
         tabBarBackground: () => <View style={styles.tabBg} />,
         tabBarShowLabel: true,
       }}
-    >
+      >
       <Tabs.Screen
         name="index"
         options={{
@@ -87,6 +95,17 @@ export default function TabsLayout() {
       />
 
       <Tabs.Screen
+        name="league"
+        options={{
+          title: 'League',
+          tabBarActiveTintColor: Colors.accent.purple,
+          tabBarIcon: ({ focused, size }) => (
+            <Shield size={size} color={focused ? Colors.accent.purple : colors.textMuted} />
+          ),
+        }}
+      />
+
+      <Tabs.Screen
         name="create-placeholder"
         options={{
           title: '',
@@ -100,7 +119,7 @@ export default function TabsLayout() {
       />
 
       <Tabs.Screen
-        name="leaderboard"
+        name="ranks"
         options={{
           title: 'Ranks',
           tabBarIcon: ({ color, size }) => (
@@ -123,7 +142,8 @@ export default function TabsLayout() {
         name="notifications"
         options={{ href: null }}
       />
-    </Tabs>
+      </Tabs>
+    </ProtectedRoute>
   );
 }
 
@@ -154,10 +174,8 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.6,
     shadowRadius: 16,

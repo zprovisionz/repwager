@@ -35,6 +35,7 @@ import {
 import { recordMaskAndUpload, type VideoUploadProgress } from '@/services/video.service';
 import { usePoseDetection } from '@/hooks/usePoseDetection';
 import { colors, typography, spacing, radius } from '@/lib/theme';
+import { BarlowText } from '@/components/ui/BarlowText';
 import { X, Zap, Clock, CheckCircle, Send, Share2 } from 'lucide-react-native';
 import type { MatchDisplay, RepEvent } from '@/types/database';
 
@@ -116,7 +117,7 @@ export default function MatchScreen() {
     [id]
   );
 
-  const { repCount, manualIncrement, reset: resetPose, lastRepValid } = usePoseDetection({
+  const { repCount, reset: resetPose, lastRepValid } = usePoseDetection({
     exerciseType: 'push_ups',
     onRepCounted: handleRepCounted,
     enabled: phase === 'recording',
@@ -563,6 +564,9 @@ export default function MatchScreen() {
 
         {phase === 'recording' && (
           <View style={styles.centreContent}>
+            <BarlowText variant="label" color={colors.primary} style={styles.poseNotice}>
+              Pose detection active
+            </BarlowText>
             {showValidFlash && <View style={styles.validFlash} />}
             {showInvalidOverlay && (
               <View style={styles.invalidOverlay}>
@@ -578,11 +582,11 @@ export default function MatchScreen() {
 
         {phase === 'reviewing' && (
           <View style={styles.centreContent}>
-            <Text style={styles.reviewTitle}>Review Your Set</Text>
+            <Text style={styles.reviewTitle}>YOUR DETECTED SCORE</Text>
             <Text style={styles.reviewReps}>{recordedReps}</Text>
-            <Text style={styles.reviewRepsLabel}>reps recorded</Text>
+            <Text style={styles.reviewRepsLabel}>reps (pose pipeline)</Text>
             <Text style={styles.reviewNote}>
-              Once submitted, your score is locked.
+              Dispute from Theatre if something looks off. No manual rep entry — score locks on submit.
             </Text>
           </View>
         )}
@@ -647,14 +651,7 @@ export default function MatchScreen() {
 
           {phase === 'recording' && (
             <View style={styles.recordingActions}>
-              <TouchableOpacity
-                style={styles.devCountBtn}
-                onPress={() => manualIncrement()}
-              >
-                <Text style={styles.devCountBtnText}>
-                  + TAP TO COUNT REP
-                </Text>
-              </TouchableOpacity>
+              <Text style={styles.poseOnlyNote}>Pose-only reps — no manual counter</Text>
               <TouchableOpacity
                 style={styles.doneBtn}
                 onPress={stopRecording}
@@ -864,6 +861,11 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     letterSpacing: 4,
   },
+  poseNotice: {
+    position: 'absolute',
+    top: '18%',
+    letterSpacing: 2,
+  },
   repCount: {
     fontFamily: typography.fontDisplay,
     fontSize: 120,
@@ -943,7 +945,14 @@ const styles = StyleSheet.create({
     color: colors.textInverse,
     letterSpacing: 1,
   },
-  recordingActions: { gap: spacing.sm },
+  recordingActions: { gap: spacing.sm, alignItems: 'stretch' },
+  poseOnlyNote: {
+    fontFamily: typography.fontBody,
+    fontSize: 12,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginBottom: spacing.xs,
+  },
   devCountBtn: {
     backgroundColor: colors.secondary,
     borderRadius: radius.md,

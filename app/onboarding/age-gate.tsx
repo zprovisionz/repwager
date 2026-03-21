@@ -67,9 +67,8 @@ export default function AgeGateScreen() {
     if (!session?.user?.id) return;
     setSaving(true);
     try {
-      await supabase
-        .from('profiles')
-        .update({ dob: dobStr, geo_region: region } as any)
+      await (supabase.from('profiles') as any)
+        .update({ dob: dobStr, geo_region: region })
         .eq('id', session.user.id);
       await refreshProfile();
       router.replace('/onboarding/fitness-disclaimer');

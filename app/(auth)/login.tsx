@@ -26,7 +26,15 @@ export default function LoginScreen() {
     try {
       await signIn(email.trim().toLowerCase(), password);
     } catch (e: any) {
-      setError(e.message ?? 'Login failed. Check your credentials.');
+      const message = e.message ?? 'Login failed. Check your credentials.';
+      if (message.toLowerCase().includes('email not confirmed')) {
+        router.replace({
+          pathname: '/(auth)/verify-email',
+          params: { email: email.trim().toLowerCase() },
+        });
+        return;
+      }
+      setError(message);
     } finally {
       setLoading(false);
     }
